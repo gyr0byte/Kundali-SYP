@@ -638,8 +638,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
-    { name = "pyswisseph" },
     { name = "sqlalchemy" },
+    { name = "swisseph-ffi" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -671,9 +671,9 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-settings", specifier = ">=2" },
     { name = "pyjwt", specifier = ">=2.8" },
-    { name = "pyswisseph", specifier = ">=2.10" },
     { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=3" },
     { name = "sqlalchemy", specifier = ">=2" },
+    { name = "swisseph-ffi", specifier = ">=0.1" },
     { name = "torch", marker = "extra == 'embeddings'", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
@@ -1299,21 +1299,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyswisseph"
-version = "2.10.3.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/66/a6/db70d67a00dda42ebd033538c086879328f4c17f670eafe8aca2f11abfef/pyswisseph-2.10.3.2.tar.gz", hash = "sha256:c54c305e83dbd5d2b71e58d8a69d8ee41de24c4d3328ce09e2af860a3537624d", size = 6940913, upload-time = "2023-06-04T17:05:53.293Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/ae/33731d803062c513f144d1ef4f20b679cf42f3c8806f6591d78f58bab4b2/pyswisseph-2.10.3.2-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:b83407a030d653ead529c07bebac72acf55426140b1b4dbf89026a1369806df6", size = 793996, upload-time = "2023-06-04T17:04:47.043Z" },
-    { url = "https://files.pythonhosted.org/packages/17/a3/2f8872cea3a7fe305db7ae2315cddd9c1b6c6ae5c51e75eff31bc44924a5/pyswisseph-2.10.3.2-cp311-cp311-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:458ee64b79fe593c68fa636ba00db81d131e5a6bd028685493bfb64b879e2d72", size = 1767751, upload-time = "2023-06-04T17:04:49.216Z" },
-    { url = "https://files.pythonhosted.org/packages/76/fa/b284fe0900f00a030754727e2c190fe16597da39ff7b6faf744cab4e3c74/pyswisseph-2.10.3.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e00d7e08aeafe00938603bc118874b6ca7871c5aaa55aafca8fa2c6d76aff812", size = 1818961, upload-time = "2023-06-04T17:04:50.799Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/e4/364678f730c52f35396d5cfc622621c18c2c5b41435253b7cd6c1befa3fc/pyswisseph-2.10.3.2-cp311-cp311-musllinux_1_1_i686.whl", hash = "sha256:b574cc5a39ea73f8916663254c8ac15c56f09735d68e9cba1e6f958a49bb45bd", size = 2307855, upload-time = "2023-06-04T17:04:52.645Z" },
-    { url = "https://files.pythonhosted.org/packages/5f/49/0561232481fa7c2fd3eb75e101bd6f749153d40b7baefa0fc1c5d8a74511/pyswisseph-2.10.3.2-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:e5cf469ef1ebbf4d426eea862b45c8ec00ab827247f69758d038924e5efb3a9d", size = 2329849, upload-time = "2023-06-04T17:04:54.099Z" },
-    { url = "https://files.pythonhosted.org/packages/08/20/0862ac62cb4ca4db18021ddf9fa20d7c4180144c1438ded6ccaa6b1d1021/pyswisseph-2.10.3.2-cp311-cp311-win32.whl", hash = "sha256:0b2208aa72e4a9265ffa6281180684bbce78becfede209ce3d1623736aade184", size = 874571, upload-time = "2023-06-04T17:04:55.596Z" },
-    { url = "https://files.pythonhosted.org/packages/f8/52/fe2e12caae15650f0fbc585bb3f740cd5ac6f7662d85e915ae38d456b7db/pyswisseph-2.10.3.2-cp311-cp311-win_amd64.whl", hash = "sha256:2b4a24f7954e1456ecbd3bb091b7c2a8a2e9838ff56e0d8af0f9e897fa84eb25", size = 1015881, upload-time = "2023-06-04T17:04:57.843Z" },
-]
-
-[[package]]
 name = "pytest"
 version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1651,6 +1636,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7b/2b/3850dc6bf7ef71b088962eba31dafc6cffd2f96e577ebb0bb316df96da3e/starlette-1.7.0.tar.gz", hash = "sha256:c79f74ea63cff761804fbbfb182f1e0b440c2d07b164d24700c5a1bab5d6ff5d", size = 2736246, upload-time = "2026-09-23T07:30:26.35Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4e/d6/1ec1b290f9e0fb067899b61e1d37a30c923068bad260b216dbe37a7d2967/starlette-1.7.0-py3-none-any.whl", hash = "sha256:67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e", size = 78980, upload-time = "2026-09-23T07:30:24.567Z" },
+]
+
+[[package]]
+name = "swisseph-ffi"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/a9/27232fdc22a93736f6fe3cd18128db32b30900902a4c7886218eac1bd2b4/swisseph_ffi-1.0.0.tar.gz", hash = "sha256:3564d62e3456bbc6ac374b135c971ec547fbe60f6b1e18ea727af8886d339f2c", size = 1618863, upload-time = "2026-05-02T16:45:48.124Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/b1/1becc43ccebaa749207cbbf1e8fa86bf0c265bca5408a6b72e04114676ec/swisseph_ffi-1.0.0-py3-none-any.whl", hash = "sha256:15f638049454251f678557da184fb3f8dfc3ff99df9a1b566470553dde2047ec", size = 1619631, upload-time = "2026-05-02T16:45:46.19Z" },
 ]
 
 [[package]]
