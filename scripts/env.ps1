@@ -16,4 +16,4 @@ $env:TORCH_HOME="D:\DevCache\torch"
 $env:XDG_CACHE_HOME="D:\DevCache\xdg"
 $env:NEXT_TELEMETRY_DISABLED="1"
 
-Write-Host "Kundali env loaded — all caches on D:\DevCache" -ForegroundColor Green
+Write-Host "Kundali env loaded - all caches on D:\DevCache" -ForegroundColor Green
