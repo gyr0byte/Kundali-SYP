@@ -1,0 +1,21 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python
+*.py text diff=python
+
+# Web
+*.js text
+*.jsx text
+*.ts text
+*.tsx text
+*.css text
+*.html text
+*.json text
+*.md text
+
+# Binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
