@@ -1,0 +1,11 @@
+[importlinter]
+root_packages =
+    app
+
+[importlinter:contract:calc-independence]
+name = Calculation engine must not import from AI layer
+type = forbidden
+source_modules =
+    app.calc
+forbidden_modules =
+    app.ai
