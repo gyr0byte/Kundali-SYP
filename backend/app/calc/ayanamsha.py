@@ -1,0 +1,1 @@
+﻿"""Ayanamsha configuration and computation."""
