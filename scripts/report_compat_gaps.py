@@ -15,6 +15,10 @@ from app.calc.timeconv import TimeInput
 from datetime import date, time
 
 fixture_path = PROJECT_ROOT / "fixtures" / "charts_private" / "fixture_001.json"
+if not fixture_path.exists():
+    print(f"Private fixture not found at {fixture_path}. Skipping.")
+    sys.exit(0)
+
 data = json.loads(fixture_path.read_text(encoding="utf-8"))
 
 b = data["birth"]
