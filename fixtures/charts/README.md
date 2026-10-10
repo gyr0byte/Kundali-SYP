@@ -56,5 +56,6 @@ Each fixture file has the following JSON structure:
 ```
 
 ### Ground Rules for Assertions
+* Any field set to `null` is **skipped**, never guessed.
 * For engine snapshot fixtures, expectations are golden-master regression checks to guarantee determinism across code changes.
 * For third-party tool comparisons (e.g. Hamro Patro), signs and nakshatra/pada are checked for exact matches, and convention variances (ayanamsha epoch, mean vs true nodes) are accounted for as user settings.

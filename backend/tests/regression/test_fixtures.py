@@ -123,10 +123,10 @@ def test_private_fixture_001() -> None:
         "fixture_near_midnight_tokyo.json",
     ],
 )
-def test_public_synthetic_fixtures(fixture_filename: str) -> None:
-    """Validate calculation engine against public synthetic test fixtures."""
+def test_public_engine_snapshots(fixture_filename: str) -> None:
+    """Validate calculation engine against public engine snapshot (golden-master) fixtures."""
     path = PUBLIC_FIXTURES_DIR / fixture_filename
-    assert path.exists(), f"Synthetic fixture missing: {path}"
+    assert path.exists(), f"Engine snapshot fixture missing: {path}"
 
     data = _load_json(path)
     time_inp, settings = _build_inputs(data)
