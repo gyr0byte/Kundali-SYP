@@ -1,0 +1,101 @@
+{
+  "_comment": "Fixture #1 — Builder's own chart. Source: Hamro Patro kundali. This is ground truth for regression tests.",
+  "birth": {
+    "date_ad": "2006-08-02",
+    "time_local": "02:10:00",
+    "timezone": "Asia/Kathmandu",
+    "utc_offset_hours": 5.75,
+    "place": "Morang, Nepal",
+    "latitude": 26.45,
+    "longitude": 87.283
+  },
+  "settings": {
+    "ayanamsha": "lahiri",
+    "node_type": "mean",
+    "house_system": "whole_sign",
+    "_note": "Hamro Patro uses Lahiri ayanamsha. Node type and house system inferred from standard North Indian convention."
+  },
+  "reference_source": "Hamro Patro",
+  "positions": {
+    "_format": "sign is the Vedic rashi name (Sanskrit). deg/min/sec/subsec is Ansh:Kala:Vikala:Prativikala within the sign. sidereal_longitude is the computed absolute sidereal longitude in decimal degrees.",
+    "lagna": {
+      "sign": "Mithun",
+      "sign_en": "Gemini",
+      "sign_number": 3,
+      "deg": 2, "min": 33, "sec": 20, "subsec": 25,
+      "sidereal_longitude": 62.556
+    },
+    "surya": {
+      "sign": "Karkat",
+      "sign_en": "Cancer",
+      "sign_number": 4,
+      "deg": 15, "min": 30, "sec": 25, "subsec": 49,
+      "sidereal_longitude": 105.507
+    },
+    "chandra": {
+      "sign": "Tula",
+      "sign_en": "Libra",
+      "sign_number": 7,
+      "deg": 9, "min": 43, "sec": 49, "subsec": 14,
+      "sidereal_longitude": 189.730,
+      "nakshatra": "Swati",
+      "pada": 1
+    },
+    "mangal": {
+      "sign": "Singh",
+      "sign_en": "Leo",
+      "sign_number": 5,
+      "deg": 12, "min": 20, "sec": 38, "subsec": 31,
+      "sidereal_longitude": 132.344
+    },
+    "budh": {
+      "sign": "Mithun",
+      "sign_en": "Gemini",
+      "sign_number": 3,
+      "deg": 27, "min": 52, "sec": 26, "subsec": 12,
+      "sidereal_longitude": 87.874
+    },
+    "brihaspati": {
+      "sign": "Tula",
+      "sign_en": "Libra",
+      "sign_number": 7,
+      "deg": 16, "min": 4, "sec": 23, "subsec": 23,
+      "sidereal_longitude": 196.073
+    },
+    "shukra": {
+      "sign": "Mithun",
+      "sign_en": "Gemini",
+      "sign_number": 3,
+      "deg": 22, "min": 40, "sec": 32, "subsec": 9,
+      "sidereal_longitude": 82.676
+    },
+    "shani": {
+      "sign": "Karkat",
+      "sign_en": "Cancer",
+      "sign_number": 4,
+      "deg": 20, "min": 33, "sec": 33, "subsec": 59,
+      "sidereal_longitude": 110.559
+    },
+    "rahu": {
+      "sign": "Meen",
+      "sign_en": "Pisces",
+      "sign_number": 12,
+      "deg": 2, "min": 26, "sec": 40, "subsec": 6,
+      "sidereal_longitude": 332.445
+    },
+    "ketu": {
+      "sign": "Kanya",
+      "sign_en": "Virgo",
+      "sign_number": 6,
+      "deg": 2, "min": 26, "sec": 40, "subsec": 6,
+      "sidereal_longitude": 152.445
+    }
+  },
+  "tolerances": {
+    "_note": "Acceptable deviations for regression tests (per project plan §15.1)",
+    "planet_longitude_degrees": 0.01,
+    "lagna_sign": "exact",
+    "moon_nakshatra_pada": "exact",
+    "lagna_boundary_warning_degrees": 0.5
+  }
+}
