@@ -74,24 +74,28 @@ def convert_local_to_utc_jd(inp: TimeInput) -> TimeConversionResult:
         except Exception as exc:
             raise ValueError(f"Invalid IANA timezone name: {inp.timezone}") from exc
 
-        # Detect ambiguous times (DST overlap, e.g. clocks turned back 2:00 -> 1:00)
         dt_fold0 = naive_dt.replace(tzinfo=tz, fold=0)
         dt_fold1 = naive_dt.replace(tzinfo=tz, fold=1)
+        rt0 = dt_fold0.astimezone(datetime.timezone.utc).astimezone(tz)
+        rt1 = dt_fold1.astimezone(datetime.timezone.utc).astimezone(tz)
+        rt0_ok = rt0.replace(tzinfo=None) == naive_dt
+        rt1_ok = rt1.replace(tzinfo=None) == naive_dt
+
+        # Detect nonexistent times (DST gap, e.g. clocks jumped forward 2:00 -> 3:00)
+        if not rt0_ok and not rt1_ok:
+            raise ValueError(
+                f"Nonexistent local time in DST gap: {naive_dt} in {inp.timezone}. "
+                "This wall-clock time was skipped by daylight saving."
+            )
+
+        # Detect ambiguous times (DST overlap, e.g. clocks turned back 2:00 -> 1:00)
         if dt_fold0.utcoffset() != dt_fold1.utcoffset():
             raise ValueError(
                 f"Ambiguous local time in DST overlap: {naive_dt} in {inp.timezone}. "
                 "Specify exact UTC offset or disambiguated time."
             )
 
-        # Detect nonexistent times (DST gap, e.g. clocks jumped forward 2:00 -> 3:00)
         utc_dt = dt_fold0.astimezone(datetime.timezone.utc)
-        roundtrip = utc_dt.astimezone(tz)
-        if roundtrip.replace(tzinfo=None) != naive_dt:
-            raise ValueError(
-                f"Nonexistent local time in DST gap: {naive_dt} in {inp.timezone}. "
-                "This wall-clock time was skipped by daylight saving."
-            )
-
         offset = dt_fold0.utcoffset()
         assert offset is not None
         offset_hours = offset.total_seconds() / 3600.0
