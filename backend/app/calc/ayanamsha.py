@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 from ctypes import c_double
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from swisseph_ffi import (  # type: ignore[import-untyped]

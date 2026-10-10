@@ -26,7 +26,7 @@ from swisseph_ffi import (  # type: ignore[import-untyped]
     SEFLG_SWIEPH,
 )
 
-from app.calc.ayanamsha import SWE_LOCK, AyanamshaMode, _SIDM_MAP, get_swe_engine
+from app.calc.ayanamsha import _SIDM_MAP, SWE_LOCK, AyanamshaMode, get_swe_engine
 
 
 class NodeType(str, Enum):

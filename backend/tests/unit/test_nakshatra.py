@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from app.calc.nakshatra import NAKSHATRA_NAMES, nakshatra_of
 
 

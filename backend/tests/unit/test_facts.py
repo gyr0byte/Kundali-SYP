@@ -12,7 +12,6 @@ from app.calc.facts import (
     ENGINE_VERSION,
     ChartFactLagna,
     ChartFactPlacement,
-    ChartFacts,
     ChartSettings,
     compute_chart_facts,
 )

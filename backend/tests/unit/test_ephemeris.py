@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.calc.ayanamsha import AyanamshaMode
-from app.calc.ephemeris import NodeType, PlanetPosition, calculate_positions
+from app.calc.ephemeris import NodeType, calculate_positions
 
 
 def test_ketu_opposite_rahu() -> None:

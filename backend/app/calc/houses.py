@@ -10,7 +10,7 @@ from ctypes import c_double
 
 from swisseph_ffi import SEFLG_SIDEREAL  # type: ignore[import-untyped]
 
-from app.calc.ayanamsha import SWE_LOCK, AyanamshaMode, _SIDM_MAP, get_swe_engine
+from app.calc.ayanamsha import _SIDM_MAP, SWE_LOCK, AyanamshaMode, get_swe_engine
 
 SIGN_NAMES: list[str] = [
     "Aries", "Taurus", "Gemini", "Cancer",

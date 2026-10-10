@@ -76,8 +76,8 @@ def convert_local_to_utc_jd(inp: TimeInput) -> TimeConversionResult:
 
         dt_fold0 = naive_dt.replace(tzinfo=tz, fold=0)
         dt_fold1 = naive_dt.replace(tzinfo=tz, fold=1)
-        rt0 = dt_fold0.astimezone(datetime.timezone.utc).astimezone(tz)
-        rt1 = dt_fold1.astimezone(datetime.timezone.utc).astimezone(tz)
+        rt0 = dt_fold0.astimezone(datetime.UTC).astimezone(tz)
+        rt1 = dt_fold1.astimezone(datetime.UTC).astimezone(tz)
         rt0_ok = rt0.replace(tzinfo=None) == naive_dt
         rt1_ok = rt1.replace(tzinfo=None) == naive_dt
 
@@ -95,7 +95,7 @@ def convert_local_to_utc_jd(inp: TimeInput) -> TimeConversionResult:
                 "Specify exact UTC offset or disambiguated time."
             )
 
-        utc_dt = dt_fold0.astimezone(datetime.timezone.utc)
+        utc_dt = dt_fold0.astimezone(datetime.UTC)
         offset = dt_fold0.utcoffset()
         assert offset is not None
         offset_hours = offset.total_seconds() / 3600.0
@@ -105,7 +105,7 @@ def convert_local_to_utc_jd(inp: TimeInput) -> TimeConversionResult:
         offset_delta = datetime.timedelta(hours=inp.utc_offset_hours)
         tz_fixed = datetime.timezone(offset_delta)
         aware_local = naive_dt.replace(tzinfo=tz_fixed)
-        utc_dt = aware_local.astimezone(datetime.timezone.utc)
+        utc_dt = aware_local.astimezone(datetime.UTC)
         offset_hours = inp.utc_offset_hours
         tz_name = None
 

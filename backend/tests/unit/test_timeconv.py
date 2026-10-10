@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -22,7 +21,7 @@ def test_julian_day_j2000_epoch() -> None:
         )
     )
     assert result.julian_day == pytest.approx(2451545.0, abs=1e-7)
-    assert result.datetime_utc == datetime.datetime(2000, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    assert result.datetime_utc == datetime.datetime(2000, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
 
 def test_nepal_timezone_45_min_offset() -> None:
@@ -37,7 +36,7 @@ def test_nepal_timezone_45_min_offset() -> None:
             timezone="Asia/Kathmandu",
         )
     )
-    expected_utc = datetime.datetime(2006, 8, 1, 20, 25, 0, tzinfo=datetime.timezone.utc)
+    expected_utc = datetime.datetime(2006, 8, 1, 20, 25, 0, tzinfo=datetime.UTC)
     assert result.datetime_utc == expected_utc
     assert result.utc_offset_hours == pytest.approx(5.75, abs=1e-5)
     # 20 + 25/60 = 20.4166667 UT hour on 2006-08-01
