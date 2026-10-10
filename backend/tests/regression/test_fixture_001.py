@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 from ctypes import c_double, create_string_buffer
 from pathlib import Path
+from typing import Any
 
 import pytest
-from swisseph_ffi import (
+from swisseph_ffi import (  # type: ignore[import-untyped]
     SE_GREG_CAL,
     SE_JUPITER,
     SE_MARS,
@@ -48,7 +49,7 @@ NAKSHATRAS = [
 
 
 @pytest.fixture(scope="module")
-def fixture_data() -> dict:
+def fixture_data() -> dict[str, Any]:
     assert FIXTURE_PATH.exists(), f"Missing fixture file: {FIXTURE_PATH}"
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
@@ -69,7 +70,9 @@ def test_ephemeris_files_present() -> None:
         assert file_path.stat().st_size > 50_000, f"Ephemeris file {filename} is unexpectedly small"
 
 
-def test_lagna_and_planetary_positions(swe_engine: SwissEph, fixture_data: dict) -> None:
+def test_lagna_and_planetary_positions(
+    swe_engine: SwissEph, fixture_data: dict[str, Any]
+) -> None:
     """Validate computed positions against fixture reference."""
     # 2006-08-02 02:10:00 Nepal Time (+5:45) -> 2006-08-01 20:25:00 UTC
     jd = swe_engine.swe_julday(2006, 8, 1, 20.0 + 25.0 / 60.0, SE_GREG_CAL)
