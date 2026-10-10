@@ -1,4 +1,4 @@
-"""Download Swiss Ephemeris data files to backend/ephe/.
+r"""Download Swiss Ephemeris data files to backend/ephe/.
 
 Downloads the three core .se1 files for the 1800-2399 AD range from
 the official astro.com FTP mirror. These provide high-precision
@@ -23,7 +23,7 @@ FILES = [
     "seas_18.se1",
 ]
 
-BASE_URL = "https://www.astro.com/ftp/swisseph/ephe"
+BASE_URL = "https://raw.githubusercontent.com/aloistr/swisseph/master/ephe"
 DEST_DIR = Path(__file__).resolve().parent.parent / "backend" / "ephe"
 
 
@@ -39,7 +39,9 @@ def download_file(filename: str) -> None:
     print(f"        -> {dest}")
 
     try:
-        urllib.request.urlretrieve(url, dest)  # noqa: S310
+        req = urllib.request.Request(url, headers={"User-Agent": "Kundali-Downloader/1.0"})
+        with urllib.request.urlopen(req) as resp, open(dest, "wb") as out_file:
+            out_file.write(resp.read())
         size = dest.stat().st_size
         print(f"  OK    {filename} ({size:,} bytes)")
     except Exception as exc:
