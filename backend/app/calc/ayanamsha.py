@@ -37,7 +37,7 @@ def get_swe_engine() -> SwissEph:
     return _SWE_INSTANCE
 
 
-class AyanamshaMode(str, Enum):
+class AyanamshaMode(StrEnum):
     """Supported sidereal ayanamsha systems."""
 
     LAHIRI = "lahiri"

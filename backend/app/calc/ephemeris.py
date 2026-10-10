@@ -7,7 +7,7 @@ Enforces thread safety under SWE_LOCK to prevent global sidereal mode leakage.
 from __future__ import annotations
 
 from ctypes import c_double, create_string_buffer
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 from swisseph_ffi import (  # type: ignore[import-untyped]
@@ -29,7 +29,7 @@ from swisseph_ffi import (  # type: ignore[import-untyped]
 from app.calc.ayanamsha import _SIDM_MAP, SWE_LOCK, AyanamshaMode, get_swe_engine
 
 
-class NodeType(str, Enum):
+class NodeType(StrEnum):
     """Lunar node calculation method."""
 
     MEAN = "mean"

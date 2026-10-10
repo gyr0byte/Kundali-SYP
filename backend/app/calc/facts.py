@@ -185,7 +185,10 @@ def compute_chart_facts(
                 threshold_degrees=0.5,
                 degree_in_sign=round(lagna_deg, 6),
                 boundary_distance_degrees=round(dist, 6),
-                note="Lagna is within 0.5 degrees of a sign boundary; a minor change in birth time may alter the rising sign.",
+                note=(
+                    "Lagna is within 0.5 degrees of a sign boundary; a minor change in "
+                    "birth time may alter the rising sign."
+                ),
             )
         )
 

@@ -10,7 +10,7 @@ from app.calc.ayanamsha import AyanamshaMode, get_ayanamsha_degrees
 
 
 def test_ayanamsha_near_j2000() -> None:
-    """Lahiri ayanamsha near J2000 (2000-01-01 12:00 UT = JD 2451545.0) is sane (~23.8° to 23.9°)."""
+    """Lahiri ayanamsha near J2000 (2000-01-01 12:00 UT) is sane (~23.8° to 23.9°)."""
     jd_j2000 = 2451545.0
     deg = get_ayanamsha_degrees(jd_j2000, AyanamshaMode.LAHIRI)
     assert 23.8 <= deg <= 23.9, f"Unexpected Lahiri ayanamsha at J2000: {deg}"
@@ -46,8 +46,10 @@ def test_sidereal_mode_isolation_alternating() -> None:
     assert expected_lahiri != expected_raman
 
     for _ in range(50):
-        assert get_ayanamsha_degrees(jd, AyanamshaMode.LAHIRI) == pytest.approx(expected_lahiri, abs=1e-12)
-        assert get_ayanamsha_degrees(jd, AyanamshaMode.RAMAN) == pytest.approx(expected_raman, abs=1e-12)
+        val_l = get_ayanamsha_degrees(jd, AyanamshaMode.LAHIRI)
+        val_r = get_ayanamsha_degrees(jd, AyanamshaMode.RAMAN)
+        assert val_l == pytest.approx(expected_lahiri, abs=1e-12)
+        assert val_r == pytest.approx(expected_raman, abs=1e-12)
 
 
 def test_thread_safe_ayanamsha_concurrency() -> None:

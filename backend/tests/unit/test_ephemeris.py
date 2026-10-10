@@ -67,5 +67,7 @@ def test_alternating_sidereal_modes_isolation() -> None:
     for _ in range(20):
         l_check = calculate_positions(jd, ayanamsha=AyanamshaMode.LAHIRI)
         r_check = calculate_positions(jd, ayanamsha=AyanamshaMode.RAMAN)
-        assert l_check.positions["sun"].longitude == pytest.approx(lahiri_1.positions["sun"].longitude, abs=1e-8)
-        assert r_check.positions["sun"].longitude == pytest.approx(raman_1.positions["sun"].longitude, abs=1e-8)
+        exp_l = lahiri_1.positions["sun"].longitude
+        exp_r = raman_1.positions["sun"].longitude
+        assert l_check.positions["sun"].longitude == pytest.approx(exp_l, abs=1e-8)
+        assert r_check.positions["sun"].longitude == pytest.approx(exp_r, abs=1e-8)
