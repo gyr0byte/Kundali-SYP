@@ -1,13 +1,20 @@
 """Report exact gaps for Fixture #1 under hamro_patro_compat preset."""
 
 import json
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+BACKEND_DIR = PROJECT_ROOT / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 from app.calc.facts import ChartSettings, compute_chart_facts
 from app.calc.houses import rashi_name
 from app.calc.timeconv import TimeInput
 from datetime import date, time
 
-fixture_path = Path("fixtures/charts_private/fixture_001.json")
+fixture_path = PROJECT_ROOT / "fixtures" / "charts_private" / "fixture_001.json"
 data = json.loads(fixture_path.read_text(encoding="utf-8"))
 
 b = data["birth"]
