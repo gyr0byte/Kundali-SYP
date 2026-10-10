@@ -102,7 +102,8 @@ def test_lagna_and_planetary_positions(swe_engine: SwissEph, fixture_data: dict)
         ref = positions[key]
 
         # Sign must match exactly
-        assert rashi == ref["sign"], f"{key} sign mismatch: computed {rashi}, expected {ref['sign']}"
+        msg = f"{key} sign mismatch: computed {rashi}, expected {ref['sign']}"
+        assert rashi == ref["sign"], msg
 
     # Ketu = Rahu + 180°
     swe_engine.swe_calc_ut(
