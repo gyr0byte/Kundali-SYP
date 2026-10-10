@@ -6,7 +6,7 @@ Kundali_Project_Plan.md §8.9. This module NEVER imports from app.ai.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,6 +26,17 @@ from app.calc.timeconv import TimeInput, convert_local_to_utc_jd
 ENGINE_VERSION: str = "0.1.0"
 
 
+CALCULATION_PRESETS: dict[str, dict[str, Any]] = {
+    "hamro_patro_compat": {
+        "ayanamsha": AyanamshaMode.LAHIRI_1940,
+        "house_system": "whole_sign",
+        "node_type": NodeType.TRUE,
+        "year_days": 365.25,
+        "preset": "hamro_patro_compat",
+    },
+}
+
+
 class ChartSettings(BaseModel):
     """Astronomical calculation conventions."""
 
@@ -35,6 +46,19 @@ class ChartSettings(BaseModel):
     house_system: Literal["whole_sign"] = "whole_sign"
     node_type: NodeType = NodeType.MEAN
     year_days: float = Field(default=365.25, description="Year length for Dasha cycles")
+    preset: str | None = Field(default=None, description="Optional named calculation preset")
+
+    @classmethod
+    def from_preset(cls, preset_name: str) -> ChartSettings:
+        """Create ChartSettings from a named preset.
+
+        Available presets:
+        - 'hamro_patro_compat': node_type=TRUE, ayanamsha=LAHIRI_1940, house_system=whole_sign
+        """
+        if preset_name not in CALCULATION_PRESETS:
+            available = ", ".join(repr(k) for k in CALCULATION_PRESETS)
+            raise ValueError(f"Unknown preset {preset_name!r}. Available presets: {available}")
+        return cls(**CALCULATION_PRESETS[preset_name])
 
 
 class ChartMetadata(BaseModel):

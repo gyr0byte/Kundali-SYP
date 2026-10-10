@@ -14,6 +14,7 @@ from pathlib import Path
 from swisseph_ffi import (  # type: ignore[import-untyped]
     SE_SIDM_KRISHNAMURTI,
     SE_SIDM_LAHIRI,
+    SE_SIDM_LAHIRI_1940,
     SE_SIDM_RAMAN,
     SwissEph,
 )
@@ -41,12 +42,14 @@ class AyanamshaMode(StrEnum):
     """Supported sidereal ayanamsha systems."""
 
     LAHIRI = "lahiri"
+    LAHIRI_1940 = "lahiri_1940"
     RAMAN = "raman"
     KRISHNAMURTI = "krishnamurti"
 
 
 _SIDM_MAP = {
     AyanamshaMode.LAHIRI: SE_SIDM_LAHIRI,
+    AyanamshaMode.LAHIRI_1940: SE_SIDM_LAHIRI_1940,
     AyanamshaMode.RAMAN: SE_SIDM_RAMAN,
     AyanamshaMode.KRISHNAMURTI: SE_SIDM_KRISHNAMURTI,
 }
