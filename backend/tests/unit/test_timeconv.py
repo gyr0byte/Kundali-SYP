@@ -75,21 +75,45 @@ def test_latitude_longitude_bounds() -> None:
     # Invalid latitude
     with pytest.raises(ValueError, match="(?i)latitude"):
         convert_local_to_utc_jd(
-            TimeInput(date=valid_date, time=valid_time, latitude=91.0, longitude=0.0, utc_offset_hours=0.0)
+            TimeInput(
+                date=valid_date,
+                time=valid_time,
+                latitude=91.0,
+                longitude=0.0,
+                utc_offset_hours=0.0,
+            )
         )
     with pytest.raises(ValueError, match="(?i)latitude"):
         convert_local_to_utc_jd(
-            TimeInput(date=valid_date, time=valid_time, latitude=-90.1, longitude=0.0, utc_offset_hours=0.0)
+            TimeInput(
+                date=valid_date,
+                time=valid_time,
+                latitude=-90.1,
+                longitude=0.0,
+                utc_offset_hours=0.0,
+            )
         )
 
     # Invalid longitude
     with pytest.raises(ValueError, match="(?i)longitude"):
         convert_local_to_utc_jd(
-            TimeInput(date=valid_date, time=valid_time, latitude=0.0, longitude=180.1, utc_offset_hours=0.0)
+            TimeInput(
+                date=valid_date,
+                time=valid_time,
+                latitude=0.0,
+                longitude=180.1,
+                utc_offset_hours=0.0,
+            )
         )
     with pytest.raises(ValueError, match="(?i)longitude"):
         convert_local_to_utc_jd(
-            TimeInput(date=valid_date, time=valid_time, latitude=0.0, longitude=-180.1, utc_offset_hours=0.0)
+            TimeInput(
+                date=valid_date,
+                time=valid_time,
+                latitude=0.0,
+                longitude=-180.1,
+                utc_offset_hours=0.0,
+            )
         )
 
 
