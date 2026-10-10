@@ -1,0 +1,94 @@
+{
+  "id": "fixture_near_midnight_tokyo",
+  "name": "Near Midnight Synthetic Chart (Tokyo)",
+  "source_tool": "Engine Snapshot",
+  "source_type": "golden_master",
+  "_comment": "Engine snapshot (golden-master) test to detect calculation regressions. Expectations are from the engine itself, not an independent third-party reference.",
+  "birth": {
+    "date": "2021-12-31",
+    "time": "23:58:00",
+    "latitude": 35.6762,
+    "longitude": 139.6503,
+    "timezone": "Asia/Tokyo"
+  },
+  "settings": {
+    "ayanamsha": "lahiri",
+    "house_system": "whole_sign",
+    "node_type": "mean"
+  },
+  "expected": {
+    "lagna": {
+      "sign": "Virgo",
+      "longitude": 167.802251,
+      "nakshatra": "Hasta",
+      "pada": 3
+    },
+    "moon": {
+      "sign": "Scorpio",
+      "longitude": 225.66486,
+      "nakshatra": "Anuradha",
+      "pada": 4
+    },
+    "planets": {
+      "sun": {
+        "sign": "Sagittarius",
+        "longitude": 255.984763,
+        "house": 4,
+        "retrograde": false
+      },
+      "moon": {
+        "sign": "Scorpio",
+        "longitude": 225.66486,
+        "house": 3,
+        "retrograde": false
+      },
+      "mars": {
+        "sign": "Scorpio",
+        "longitude": 228.671188,
+        "house": 3,
+        "retrograde": false
+      },
+      "mercury": {
+        "sign": "Capricorn",
+        "longitude": 273.484261,
+        "house": 5,
+        "retrograde": false
+      },
+      "jupiter": {
+        "sign": "Aquarius",
+        "longitude": 306.31209,
+        "house": 6,
+        "retrograde": false
+      },
+      "venus": {
+        "sign": "Sagittarius",
+        "longitude": 269.315216,
+        "house": 4,
+        "retrograde": true
+      },
+      "saturn": {
+        "sign": "Capricorn",
+        "longitude": 287.701702,
+        "house": 5,
+        "retrograde": false
+      },
+      "rahu": {
+        "sign": "Taurus",
+        "longitude": 35.390146,
+        "house": 9,
+        "retrograde": true
+      },
+      "ketu": {
+        "sign": "Scorpio",
+        "longitude": 215.390146,
+        "house": 3,
+        "retrograde": true
+      }
+    }
+  },
+  "tolerances": {
+    "planet_longitude_degrees": 0.01,
+    "lagna_sign": "exact",
+    "moon_nakshatra_pada": "exact"
+  }
+}

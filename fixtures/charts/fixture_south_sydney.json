@@ -1,0 +1,94 @@
+{
+  "id": "fixture_south_sydney",
+  "name": "Southern Hemisphere Synthetic Chart (Sydney)",
+  "source_tool": "Engine Snapshot",
+  "source_type": "golden_master",
+  "_comment": "Engine snapshot (golden-master) test to detect calculation regressions. Expectations are from the engine itself, not an independent third-party reference.",
+  "birth": {
+    "date": "1998-11-20",
+    "time": "08:45:00",
+    "latitude": -33.8688,
+    "longitude": 151.2093,
+    "timezone": "Australia/Sydney"
+  },
+  "settings": {
+    "ayanamsha": "lahiri",
+    "house_system": "whole_sign",
+    "node_type": "mean"
+  },
+  "expected": {
+    "lagna": {
+      "sign": "Sagittarius",
+      "longitude": 257.811948,
+      "nakshatra": "Purva Ashadha",
+      "pada": 2
+    },
+    "moon": {
+      "sign": "Scorpio",
+      "longitude": 221.428624,
+      "nakshatra": "Anuradha",
+      "pada": 3
+    },
+    "planets": {
+      "sun": {
+        "sign": "Scorpio",
+        "longitude": 213.517707,
+        "house": 12,
+        "retrograde": false
+      },
+      "moon": {
+        "sign": "Scorpio",
+        "longitude": 221.428624,
+        "house": 12,
+        "retrograde": false
+      },
+      "mars": {
+        "sign": "Virgo",
+        "longitude": 151.905215,
+        "house": 10,
+        "retrograde": false
+      },
+      "mercury": {
+        "sign": "Scorpio",
+        "longitude": 233.528158,
+        "house": 12,
+        "retrograde": false
+      },
+      "jupiter": {
+        "sign": "Aquarius",
+        "longitude": 324.392733,
+        "house": 3,
+        "retrograde": false
+      },
+      "venus": {
+        "sign": "Scorpio",
+        "longitude": 218.706567,
+        "house": 12,
+        "retrograde": false
+      },
+      "saturn": {
+        "sign": "Aries",
+        "longitude": 4.298579,
+        "house": 5,
+        "retrograde": true
+      },
+      "rahu": {
+        "sign": "Leo",
+        "longitude": 122.786637,
+        "house": 9,
+        "retrograde": true
+      },
+      "ketu": {
+        "sign": "Aquarius",
+        "longitude": 302.786637,
+        "house": 3,
+        "retrograde": true
+      }
+    }
+  },
+  "tolerances": {
+    "planet_longitude_degrees": 0.01,
+    "lagna_sign": "exact",
+    "moon_nakshatra_pada": "exact"
+  }
+}

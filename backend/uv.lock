@@ -640,6 +640,7 @@ dependencies = [
     { name = "pyjwt" },
     { name = "sqlalchemy" },
     { name = "swisseph-ffi" },
+    { name = "tzdata" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -675,6 +676,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2" },
     { name = "swisseph-ffi", specifier = ">=0.1" },
     { name = "torch", marker = "extra == 'embeddings'", specifier = ">=2.0" },
+    { name = "tzdata", specifier = ">=2024.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 provides-extras = ["embeddings"]
