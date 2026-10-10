@@ -34,8 +34,7 @@ planets = expected["planets"]
 
 print("=" * 110)
 print(f"PRESET: hamro_patro_compat (Ayanamsha: {settings.ayanamsha.value}, Node: {settings.node_type.value})")
-print(f"Ayanamsha degrees: {doc.ayanamsha_degrees:.6f}°")
-print(f"Ephemeris Provenance: {doc.provenance}")
+print(f"Ephemeris Source: {doc.metadata.ephemeris_source}")
 print("=" * 110)
 header = (
     f"{'Point':<10} | {'HP Sign':<8} | {'HP DMS':<9} | {'HP Deg':<11} | "
