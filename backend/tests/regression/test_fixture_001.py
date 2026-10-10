@@ -127,7 +127,9 @@ def test_lagna_and_planetary_positions(
     assert asc_rashi == positions["lagna"]["sign"]
 
 
-def test_moon_nakshatra_and_pada(swe_engine: SwissEph, fixture_data: dict) -> None:
+def test_moon_nakshatra_and_pada(
+    swe_engine: SwissEph, fixture_data: dict[str, Any]
+) -> None:
     """Validate Moon Nakshatra and Pada match ground truth."""
     jd = swe_engine.swe_julday(2006, 8, 1, 20.0 + 25.0 / 60.0, SE_GREG_CAL)
     xx = (c_double * 6)()
