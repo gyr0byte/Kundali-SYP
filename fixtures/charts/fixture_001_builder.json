@@ -11,9 +11,9 @@
   },
   "settings": {
     "ayanamsha": "lahiri",
-    "node_type": "mean",
+    "node_type": "true",
     "house_system": "whole_sign",
-    "_note": "Hamro Patro uses Lahiri ayanamsha. Node type and house system inferred from standard North Indian convention."
+    "_note": "Hamro Patro uses Lahiri ayanamsha and True Node (Rahu/Ketu)."
   },
   "reference_source": "Hamro Patro",
   "positions": {
