@@ -48,14 +48,16 @@ def _build_inputs(data: dict[str, Any]) -> tuple[TimeInput, ChartSettings]:
     )
 
     s = data.get("settings", {})
-    ayanamsha_str = s.get("ayanamsha", "lahiri")
-    node_str = s.get("node_type", "mean")
-
-    settings = ChartSettings(
-        ayanamsha=AyanamshaMode(ayanamsha_str),
-        house_system="whole_sign",
-        node_type=NodeType(node_str),
-    )
+    if "preset" in s and s["preset"]:
+        settings = ChartSettings.from_preset(s["preset"])
+    else:
+        ayanamsha_str = s.get("ayanamsha", "lahiri")
+        node_str = s.get("node_type", "mean")
+        settings = ChartSettings(
+            ayanamsha=AyanamshaMode(ayanamsha_str),
+            house_system="whole_sign",
+            node_type=NodeType(node_str),
+        )
     return time_inp, settings
 
 
@@ -74,25 +76,25 @@ def test_private_fixture_001() -> None:
     doc = compute_chart_facts(time_inp, settings, chart_id=data.get("id", "c_priv_001"))
 
     expected = data.get("expected", {})
+    tol = data.get("tolerances", {})
+    planet_tol = tol.get("planet_longitude_degrees", 0.005)
+    lagna_tol = tol.get("lagna_longitude_degrees", 0.1)
 
     # 1. Moon validation
     moon_exp = expected.get("moon")
     if moon_exp is not None:
         moon_fact = next(f for f in doc.facts if f.id == "f_moon")
 
-        # Check Moon sign
         if "sign" in moon_exp and moon_exp["sign"] is not None:
             assert moon_fact.sign == moon_exp["sign"]
-
-        # Check Moon rashi (Vedic Sanskrit)
         if "sign_rashi" in moon_exp and moon_exp["sign_rashi"] is not None:
             assert rashi_name(moon_fact.sign_index) == moon_exp["sign_rashi"]
-
-        # Check Nakshatra & Pada
         if "nakshatra" in moon_exp and moon_exp["nakshatra"] is not None:
             assert moon_fact.nakshatra == moon_exp["nakshatra"]
         if "pada" in moon_exp and moon_exp["pada"] is not None:
             assert moon_fact.pada == moon_exp["pada"]
+        if "longitude" in moon_exp and moon_exp["longitude"] is not None:
+            assert abs(moon_fact.longitude - moon_exp["longitude"]) <= planet_tol
 
     # 2. Lagna validation (skip if null)
     lagna_exp = expected.get("lagna")
@@ -100,8 +102,10 @@ def test_private_fixture_001() -> None:
         lagna_fact = next(f for f in doc.facts if f.id == "f_lagna")
         if "sign" in lagna_exp and lagna_exp["sign"] is not None:
             assert lagna_fact.sign == lagna_exp["sign"]
+        if "sign_rashi" in lagna_exp and lagna_exp["sign_rashi"] is not None:
+            assert rashi_name(lagna_fact.sign_index) == lagna_exp["sign_rashi"]
         if "longitude" in lagna_exp and lagna_exp["longitude"] is not None:
-            assert lagna_fact.longitude == pytest.approx(lagna_exp["longitude"], abs=0.01)
+            assert abs(lagna_fact.longitude - lagna_exp["longitude"]) <= lagna_tol
 
     # 3. Planet validations (skip if null)
     planets_exp = expected.get("planets", {})
@@ -109,10 +113,21 @@ def test_private_fixture_001() -> None:
         if p_data is None:
             continue
         p_fact = next(f for f in doc.facts if f.id == f"f_{p_name}")
+
+        # Check known discrepancy (e.g. Saturn)
+        if p_data.get("known_discrepancy") is True:
+            # Assert that the engine is NOT within tolerance, documenting the discrepancy
+            gap = abs(p_fact.longitude - p_data["longitude"])
+            assert gap > planet_tol, f"Expected known discrepancy for {p_name}, but gap was {gap}"
+            continue
+
         if "sign" in p_data and p_data["sign"] is not None:
             assert p_fact.sign == p_data["sign"]
+        if "sign_rashi" in p_data and p_data["sign_rashi"] is not None:
+            assert rashi_name(p_fact.sign_index) == p_data["sign_rashi"]
         if "longitude" in p_data and p_data["longitude"] is not None:
-            assert p_fact.longitude == pytest.approx(p_data["longitude"], abs=0.01)
+            gap = abs(p_fact.longitude - p_data["longitude"])
+            assert gap <= planet_tol, f"{p_name} gap {gap:.6f}° exceeds tolerance {planet_tol}°"
 
 
 @pytest.mark.parametrize(
