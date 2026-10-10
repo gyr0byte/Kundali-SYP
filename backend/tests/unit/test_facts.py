@@ -131,3 +131,20 @@ def test_planet_facts_structure(
     assert 1 <= moon_fact.pada <= 4
     assert isinstance(moon_fact.retrograde, bool)
     assert isinstance(moon_fact.speed, float)
+
+
+def test_default_chart_settings() -> None:
+    """Default ChartSettings uses Lahiri ayanamsha and Mean node."""
+    settings = ChartSettings()
+    assert settings.ayanamsha == AyanamshaMode.LAHIRI
+    assert settings.node_type == NodeType.MEAN
+    assert settings.house_system == "whole_sign"
+
+
+def test_preset_hamro_patro_compat() -> None:
+    """ChartSettings.from_preset('hamro_patro_compat') returns True node and LAHIRI_1940."""
+    settings = ChartSettings.from_preset("hamro_patro_compat")
+    assert settings.ayanamsha == AyanamshaMode.LAHIRI_1940
+    assert settings.node_type == NodeType.TRUE
+    assert settings.house_system == "whole_sign"
+    assert settings.preset == "hamro_patro_compat"

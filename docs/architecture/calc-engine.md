@@ -61,7 +61,7 @@ When Kundali outputs differ from third-party software (e.g. Hamro Patro, Jaganna
 
 Regression testing against Hamro Patro reference data (Fixture #1) revealed:
 * **Planetary Longitudes (Sun, Moon, Mars, Mercury, Jupiter, Venus, Rahu, Ketu):** There is a constant offset of about 41 arcseconds under the default Lahiri, reduced to about 11 arcseconds under LAHIRI_1940 with true node; remaining difference unexplained.
-* **Saturn Discrepancy:** Engine confirmed by direct library call, stock pyswisseph and an independent analytic ephemeris; Hamro Patro's displayed value matches the engine's position three days later; cause unconfirmed. The discrepancy is explicitly documented and asserted in regression testing (`known_discrepancy: true`).
+* **Saturn Discrepancy:** Checked externally by the project author on 2026-10-10 (stock pyswisseph in Moshier mode; astropy's built-in ephemeris for Saturn); not reproduced by the repository's tests. Hamro Patro's displayed value matches the engine's position three days later; cause unconfirmed. The discrepancy is explicitly documented and asserted in regression testing (`known_discrepancy: true`).
 * **Lagna Discrepancy:** About 4.1 arcminutes, cause unconfirmed; engine matches stock Swiss Ephemeris. (Birth coordinates were confirmed identical at 87.283°E, 26.45°N, ruling out coordinate differences).
 
 | Source of Variation | Typical Discrepancy | Architectural Resolution |

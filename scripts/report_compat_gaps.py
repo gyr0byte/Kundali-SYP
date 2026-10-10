@@ -37,7 +37,9 @@ expected = data["expected"]
 planets = expected["planets"]
 
 print("=" * 110)
-print(f"PRESET: hamro_patro_compat (Ayanamsha: {settings.ayanamsha.value}, Node: {settings.node_type.value})")
+print(
+    f"PRESET: hamro_patro_compat (Ayanamsha: {settings.ayanamsha.value}, Node: {settings.node_type.value})"
+)
 print(f"Ephemeris Source: {doc.metadata.ephemeris_source}")
 print("=" * 110)
 header = (
@@ -55,7 +57,7 @@ l_sec = l_gap * 3600
 l_status = "PASS (<= 0.1°)" if abs(l_gap) <= 0.1 else "FAIL"
 print(
     f"{'Lagna':<10} | {l_exp['sign_rashi']:<8} | {l_exp['dms']:<9} | {l_exp['longitude']:<11.6f} | "
-    f"{l_fact.longitude:<11.6f} | {l_gap:<+11.6f} | {l_sec:<+10.2f}\"   | {l_status}"
+    f'{l_fact.longitude:<11.6f} | {l_gap:<+11.6f} | {l_sec:<+10.2f}"   | {l_status}'
 )
 
 # Moon
@@ -66,14 +68,10 @@ m_sec = m_gap * 3600
 m_status = "PASS (<= 0.005°)" if abs(m_gap) <= 0.005 else "FAIL"
 print(
     f"{'Moon':<10} | {m_exp['sign_rashi']:<8} | {m_exp['dms']:<9} | {m_exp['longitude']:<11.6f} | "
-    f"{m_fact.longitude:<11.6f} | {m_gap:<+11.6f} | {m_sec:<+10.2f}\"   | {m_status}"
+    f'{m_fact.longitude:<11.6f} | {m_gap:<+11.6f} | {m_sec:<+10.2f}"   | {m_status}'
 )
-print(
-    f"  -> Moon Nakshatra: {m_fact.nakshatra} (Expected: {m_exp['nakshatra']}) [MATCH EXACT]"
-)
-print(
-    f"  -> Moon Pada:      {m_fact.pada} (Expected: {m_exp['pada']}) [MATCH EXACT]"
-)
+print(f"  -> Moon Nakshatra: {m_fact.nakshatra} (Expected: {m_exp['nakshatra']}) [MATCH EXACT]")
+print(f"  -> Moon Pada:      {m_fact.pada} (Expected: {m_exp['pada']}) [MATCH EXACT]")
 
 # Planets
 for p_key, p_data in planets.items():
@@ -88,7 +86,7 @@ for p_key, p_data in planets.items():
     p_title = p_key.capitalize()
     print(
         f"{p_title:<10} | {p_data['sign_rashi']:<8} | {p_data['dms']:<9} | {p_data['longitude']:<11.6f} | "
-        f"{p_fact.longitude:<11.6f} | {gap:<+11.6f} | {sec:<+10.2f}\"   | {status}"
+        f'{p_fact.longitude:<11.6f} | {gap:<+11.6f} | {sec:<+10.2f}"   | {status}'
     )
 
 print("=" * 110)

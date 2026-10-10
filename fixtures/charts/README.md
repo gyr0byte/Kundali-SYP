@@ -60,7 +60,7 @@ Each fixture file has the following JSON structure:
 * For engine snapshot fixtures, expectations are golden-master regression checks to guarantee determinism across code changes.
 * For third-party tool comparisons (e.g. Hamro Patro in `fixture_001.json`):
   - **Planetary Longitudes:** Constant offset of about 41 arcseconds under the default Lahiri, reduced to about 11 arcseconds under LAHIRI_1940 with true node; remaining difference unexplained.
-  - **Saturn:** Engine confirmed by direct library call, stock pyswisseph and an independent analytic ephemeris; Hamro Patro's displayed value matches the engine's position three days later; cause unconfirmed. Asserted in tests as a known discrepancy (`known_discrepancy: true`) exceeding tolerance.
+  - **Saturn:** Checked externally by the project author on 2026-10-10 (stock pyswisseph in Moshier mode; astropy's built-in ephemeris for Saturn); not reproduced by the repository's tests. Hamro Patro's displayed value matches the engine's position three days later; cause unconfirmed. Asserted in tests as a known discrepancy (`known_discrepancy: true`) exceeding tolerance.
   - **Lagna Gap:** About 4.1 arcminutes, cause unconfirmed; engine matches stock Swiss Ephemeris. (Birth coordinates confirmed identical, ruling out coordinate discrepancy).
   - Signs and Moon nakshatra/pada are checked for exact matches under the `hamro_patro_compat` preset.
 

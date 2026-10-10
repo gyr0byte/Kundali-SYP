@@ -71,3 +71,12 @@ def test_thread_safe_ayanamsha_concurrency() -> None:
             res = fut.result()
             expected = expected_lahiri if mode == AyanamshaMode.LAHIRI else expected_raman
             assert res == pytest.approx(expected, abs=1e-12)
+
+
+def test_lahiri_1940_difference_at_jd() -> None:
+    """LAHIRI_1940 differs from standard LAHIRI at JD 2453949.350694 by 0.010° to 0.020°."""
+    jd = 2453949.350694
+    val_lahiri = get_ayanamsha_degrees(jd, AyanamshaMode.LAHIRI)
+    val_lahiri_1940 = get_ayanamsha_degrees(jd, AyanamshaMode.LAHIRI_1940)
+    diff = abs(val_lahiri_1940 - val_lahiri)
+    assert 0.010 <= diff <= 0.020, f"Expected diff between 0.010 and 0.020 deg, got {diff:.6f}"

@@ -58,15 +58,17 @@ def load_fixture() -> tuple[dict, TimeInput, dict, float]:
 
     data = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
     b = data["birth"]
+    tz = b.get("timezone")
     t_inp = TimeInput(
         date=datetime.date.fromisoformat(b["date"]),
         time=datetime.time.fromisoformat(b["time"]),
         latitude=b["latitude"],
         longitude=b["longitude"],
-        timezone=b.get("timezone"),
-        utc_offset_hours=b.get("utc_offset_hours"),
+        timezone=tz,
+        utc_offset_hours=b.get("utc_offset_hours") if tz is None else None,
     )
-    _, jd_birth = convert_local_to_utc_jd(t_inp)
+    time_res = convert_local_to_utc_jd(t_inp)
+    jd_birth = time_res.julian_day
 
     # Build reference lookup dynamically
     exp = data["expected"]
@@ -130,7 +132,7 @@ def run_item_1(t_inp: TimeInput, ref: dict) -> None:
 
         ref_str = f"{r['sign']} {r['dms']}"
         print(
-            f"{key.capitalize():8} | {ref_str:20} | {ref_deg:16.6f}° | {eng_deg:13.6f}° | {gap_deg:+13.6f}° | {gap_sec:+11.2f}\""
+            f'{key.capitalize():8} | {ref_str:20} | {ref_deg:16.6f}° | {eng_deg:13.6f}° | {gap_deg:+13.6f}° | {gap_sec:+11.2f}"'
         )
     print("=" * 105)
 
@@ -165,7 +167,9 @@ def run_item_2(jd_birth: float, ref: dict) -> None:
     xx = (c_double * 6)()
     serr = create_string_buffer(256)
 
-    print(f"Reference Rahu: {ref['rahu']['sign']} {ref['rahu']['dms']} ({ref_rahu_deg:.6f}°, abs_lon: {ref_rahu_lon:.6f}°)\n")
+    print(
+        f"Reference Rahu: {ref['rahu']['sign']} {ref['rahu']['dms']} ({ref_rahu_deg:.6f}°, abs_lon: {ref_rahu_lon:.6f}°)\n"
+    )
     print(
         f"{'Ayanamsha Mode':42} | {'Node':6} | {'Rahu Lon':12} | {'Deg in Sign':12} | {'Gap (Deg)':12} | {'Gap (Arcsec)':12}"
     )
@@ -179,7 +183,7 @@ def run_item_2(jd_birth: float, ref: dict) -> None:
         gap_deg = lon - ref_rahu_lon
         gap_sec = gap_deg * 3600.0
         print(
-            f"{mode_name:42} | {'TRUE':6} | {lon:11.6f}° | {deg_in_sign:11.6f}° | {gap_deg:+11.6f}° | {gap_sec:+11.2f}\""
+            f'{mode_name:42} | {"TRUE":6} | {lon:11.6f}° | {deg_in_sign:11.6f}° | {gap_deg:+11.6f}° | {gap_sec:+11.2f}"'
         )
 
     # Also compare MEAN node under Lahiri for contrast
@@ -190,7 +194,7 @@ def run_item_2(jd_birth: float, ref: dict) -> None:
     gap_mean_deg = lon_mean - ref_rahu_lon
     gap_mean_sec = gap_mean_deg * 3600.0
     print(
-        f"{'Lahiri (SE_SIDM_LAHIRI) [MEAN node]':42} | {'MEAN':6} | {lon_mean:11.6f}° | {deg_mean:11.6f}° | {gap_mean_deg:+11.6f}° | {gap_mean_sec:+11.2f}\""
+        f'{"Lahiri (SE_SIDM_LAHIRI) [MEAN node]":42} | {"MEAN":6} | {lon_mean:11.6f}° | {deg_mean:11.6f}° | {gap_mean_deg:+11.6f}° | {gap_mean_sec:+11.2f}"'
     )
     print("=" * 105)
 
@@ -217,41 +221,66 @@ def run_item_3(jd_birth: float, ref: dict) -> None:
     serr = create_string_buffer(256)
 
     # Direct library call with standard SWIEPH sidereal
-    iflag = swe.swe_calc_ut(c_double(jd_birth), SE_SATURN, SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL, xx, serr)
+    iflag = swe.swe_calc_ut(
+        c_double(jd_birth), SE_SATURN, SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL, xx, serr
+    )
     lon_direct = xx[0] % 360.0
     deg_direct = lon_direct % 30.0
     speed_direct = xx[3]
 
-    print(f"Reference Saturn: {ref['saturn']['sign']} {ref_saturn_dms} ({ref_saturn_deg:.6f}°, lon: {ref_saturn_lon:.6f}°)")
-    print(f"Direct SwissEph : {int(deg_direct)}:{int((deg_direct%1)*60):02d}:{int(((deg_direct%1)*60%1)*60):02d} ({deg_direct:.6f}°, lon: {lon_direct:.6f}°)")
-    print(f"Direct Library iflag: {iflag} (SEFLG_SWIEPH={bool(iflag & SEFLG_SWIEPH)}), speed: {speed_direct:.6f}°/day")
+    print(
+        f"Reference Saturn: {ref['saturn']['sign']} {ref_saturn_dms} ({ref_saturn_deg:.6f}°, lon: {ref_saturn_lon:.6f}°)"
+    )
+    print(
+        f"Direct SwissEph : {int(deg_direct)}:{int((deg_direct % 1) * 60):02d}:{int(((deg_direct % 1) * 60 % 1) * 60):02d} ({deg_direct:.6f}°, lon: {lon_direct:.6f}°)"
+    )
+    print(
+        f"Direct Library iflag: {iflag} (SEFLG_SWIEPH={bool(iflag & SEFLG_SWIEPH)}), speed: {speed_direct:.6f}°/day"
+    )
     gap = lon_direct - ref_saturn_lon
-    print(f"Gap: {gap:+.6f}° ({gap * 3600.0:+.2f}\" = {abs(gap*60):.2f} arcminutes)")
+    print(f'Gap: {gap:+.6f}° ({gap * 3600.0:+.2f}" = {abs(gap * 60):.2f} arcminutes)')
 
     # Test variations to investigate offset days relative to jd_birth
     print("\nHypothesis Tests for Reference Saturn Value:")
     print("--- Testing adjacent dates relative to birth Julian Day ---")
     for offset_days in [-1, 0, 1, 2, 3]:
-        for desc, h_delta in [("Same time", 0.0), ("-2 hours", -2.0/24.0), ("+3 hours", 3.0/24.0), ("+10 hours", 10.0/24.0)]:
+        for desc, h_delta in [
+            ("Same time", 0.0),
+            ("-2 hours", -2.0 / 24.0),
+            ("+3 hours", 3.0 / 24.0),
+            ("+10 hours", 10.0 / 24.0),
+        ]:
             test_jd = jd_birth + offset_days + h_delta
-            swe.swe_calc_ut(c_double(test_jd), SE_SATURN, SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL, xx, serr)
+            swe.swe_calc_ut(
+                c_double(test_jd), SE_SATURN, SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL, xx, serr
+            )
             t_lon = xx[0] % 360.0
             t_deg = t_lon % 30.0
             m_arc = int((t_deg % 1) * 60)
             s_arc = int(((t_deg % 1) * 60 % 1) * 60)
             diff = abs(t_deg - ref_saturn_deg)
             if diff < 0.05:
-                print(f"  >>> MATCH FOUND: Offset {offset_days:+d}d, {desc:15} -> {int(t_deg)}:{m_arc:02d}:{s_arc:02d} ({t_deg:.4f}°) | diff={diff*3600:.1f}\"")
+                print(
+                    f'  >>> MATCH FOUND: Offset {offset_days:+d}d, {desc:15} -> {int(t_deg)}:{m_arc:02d}:{s_arc:02d} ({t_deg:.4f}°) | diff={diff * 3600:.1f}"'
+                )
 
     # Tropical position
     swe.swe_calc_ut(c_double(jd_birth), SE_SATURN, SEFLG_SWIEPH | SEFLG_SPEED, xx, serr)
     trop_lon = xx[0] % 360.0
-    print(f"\nTropical Saturn: {trop_lon:.6f}° ({int(trop_lon//30)}:{trop_lon%30:.4f}°)")
+    print(f"\nTropical Saturn: {trop_lon:.6f}° ({int(trop_lon // 30)}:{trop_lon % 30:.4f}°)")
 
     # Truepos
-    swe.swe_calc_ut(c_double(jd_birth), SE_SATURN, SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_TRUEPOS, xx, serr)
+    swe.swe_calc_ut(
+        c_double(jd_birth),
+        SE_SATURN,
+        SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_TRUEPOS,
+        xx,
+        serr,
+    )
     truepos_lon = xx[0] % 360.0
-    print(f"Truepos (geometric, no light-time) Saturn: {truepos_lon:.6f}° (diff: {(truepos_lon - lon_direct)*3600:.2f}\")")
+    print(
+        f'Truepos (geometric, no light-time) Saturn: {truepos_lon:.6f}° (diff: {(truepos_lon - lon_direct) * 3600:.2f}")'
+    )
 
 
 def run_item_6(jd_birth: float, t_inp: TimeInput, ref: dict) -> None:
@@ -273,11 +302,17 @@ def run_item_6(jd_birth: float, t_inp: TimeInput, ref: dict) -> None:
 
     print(f"Base Coordinates : Lat {base_lat:.4f}°, Lon {base_lon:.4f}°")
     print(f"Base Engine Lagna: {ref['lagna']['sign']} {base_deg:.6f}° (lon: {base_lagna:.6f}°)")
-    print(f"Reference Lagna  : {ref['lagna']['sign']} {ref_lagna_deg:.6f}° (lon: {ref_lagna_lon:.6f}°)")
+    print(
+        f"Reference Lagna  : {ref['lagna']['sign']} {ref_lagna_deg:.6f}° (lon: {ref_lagna_lon:.6f}°)"
+    )
     gap_base = base_lagna - ref_lagna_lon
-    print(f"Initial Gap      : {gap_base:+.6f}° ({gap_base * 3600.0:+.2f}\" = {gap_base * 60.0:+.2f} arcminutes)\n")
+    print(
+        f'Initial Gap      : {gap_base:+.6f}° ({gap_base * 3600.0:+.2f}" = {gap_base * 60.0:+.2f} arcminutes)\n'
+    )
 
-    print(f"{'Variation':32} | {'Lat':8} | {'Lon':8} | {'Lagna Lon':12} | {'Deg in Sign':14} | {'Delta vs Base':13} | {'Gap vs Ref':12}")
+    print(
+        f"{'Variation':32} | {'Lat':8} | {'Lon':8} | {'Lagna Lon':12} | {'Deg in Sign':14} | {'Delta vs Base':13} | {'Gap vs Ref':12}"
+    )
     print("-" * 105)
 
     variations = [
@@ -296,7 +331,9 @@ def run_item_6(jd_birth: float, t_inp: TimeInput, ref: dict) -> None:
         deg = lagna % 30.0
         delta_base = (lagna - base_lagna) * 3600.0
         gap_ref = (lagna - ref_lagna_lon) * 3600.0
-        print(f"{label:32} | {lat:8.4f} | {lon:8.4f} | {lagna:11.6f}° | {deg:13.6f}° | {delta_base:+10.1f}\" | {gap_ref:+10.1f}\"")
+        print(
+            f'{label:32} | {lat:8.4f} | {lon:8.4f} | {lagna:11.6f}° | {deg:13.6f}° | {delta_base:+10.1f}" | {gap_ref:+10.1f}"'
+        )
 
     print("=" * 105)
 
