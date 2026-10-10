@@ -15,9 +15,9 @@ Each fixture file has the following JSON structure:
 {
   "id": "fixture_north_london",
   "name": "Northern Hemisphere Test Case (London)",
-  "source_tool": "Swiss Ephemeris Direct Call",
-  "source_type": "synthetic",
-  "_comment": "Expectations computed directly from Swiss Ephemeris v2.10 direct call. This is NOT an independent third-party reference.",
+  "source_tool": "Engine Snapshot",
+  "source_type": "golden_master",
+  "_comment": "Engine snapshot (golden-master) test to detect calculation regressions. Expectations are from the engine itself, not an independent third-party reference.",
   "birth": {
     "date": "2015-05-15",
     "time": "14:30:00",

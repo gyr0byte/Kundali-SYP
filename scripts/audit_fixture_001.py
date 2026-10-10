@@ -301,7 +301,7 @@ def run_item_6() -> None:
     gap_base = base_lagna - ref_lagna_lon
     print(f"Initial Gap      : {gap_base:+.6f}° ({gap_base * 3600.0:+.2f}\" = {gap_base * 60.0:+.2f} arcminutes)\n")
 
-    print(f"{'Variation':30} | {'Lat':8} | {'Lon':8} | {'Lagna Lon':12} | {'Deg in Mithun':14} | {'Δ vs Base':12} | {'Gap vs Ref':12}")
+    print(f"{'Variation':32} | {'Lat':8} | {'Lon':8} | {'Lagna Lon':12} | {'Deg in Mithun':14} | {'Delta vs Base':13} | {'Gap vs Ref':12}")
     print("-" * 105)
 
     variations = [

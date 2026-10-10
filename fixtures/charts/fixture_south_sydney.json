@@ -1,9 +1,9 @@
 {
   "id": "fixture_south_sydney",
   "name": "Southern Hemisphere Synthetic Chart (Sydney)",
-  "source_tool": "Swiss Ephemeris Direct Call",
-  "source_type": "synthetic",
-  "_comment": "Synthetic reference chart computed directly from Swiss Ephemeris v2.10 (DE441). Expectations are from the Swiss Ephemeris direct call, not an independent third-party reference.",
+  "source_tool": "Engine Snapshot",
+  "source_type": "golden_master",
+  "_comment": "Engine snapshot (golden-master) test to detect calculation regressions. Expectations are from the engine itself, not an independent third-party reference.",
   "birth": {
     "date": "1998-11-20",
     "time": "08:45:00",
