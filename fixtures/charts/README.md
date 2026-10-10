@@ -1,10 +1,61 @@
-﻿# Reference Charts
+# Kundali Chart Fixtures Specification
 
-This directory contains reference chart fixtures for regression testing.
+This directory contains regression test fixtures for the Kundali calculation engine.
 
-## Format
-Each fixture is a JSON file containing:
-- `birth_data`: date (UTC), latitude, longitude, timezone
-- `expected`: planetary positions, lagna, nakshatras, dashas
-- `source`: the reference tool and version used to produce the expected values
-- `notes`: any conventions (ayanamsha, node type, year length)
+## Directory Structure
+
+* `fixtures/charts/`: Public fixtures, including synthetic charts and published textbook examples.
+* `fixtures/charts_private/`: Private fixtures (git-ignored, personal charts). If absent, tests that reference private fixtures will skip cleanly.
+
+## Fixture JSON Schema
+
+Each fixture file has the following JSON structure:
+
+```json
+{
+  "id": "fixture_north_london",
+  "name": "Northern Hemisphere Test Case (London)",
+  "source_tool": "Swiss Ephemeris Direct Call",
+  "source_type": "synthetic",
+  "_comment": "Expectations computed directly from Swiss Ephemeris v2.10 direct call. This is NOT an independent third-party reference.",
+  "birth": {
+    "date": "2015-05-15",
+    "time": "14:30:00",
+    "latitude": 51.5074,
+    "longitude": -0.1278,
+    "timezone": "Europe/London",
+    "utc_offset_hours": 1.0
+  },
+  "settings": {
+    "ayanamsha": "lahiri",
+    "house_system": "whole_sign",
+    "node_type": "mean"
+  },
+  "expected": {
+    "lagna": {
+      "sign": "Virgo",
+      "longitude": 164.123456
+    },
+    "moon": {
+      "sign": "Pisces",
+      "longitude": 348.654321,
+      "nakshatra": "Revati",
+      "pada": 3
+    },
+    "planets": {
+      "sun": { "sign": "Taurus", "longitude": 30.123456 },
+      "mars": { "sign": "Taurus", "longitude": 39.654321 }
+    }
+  },
+  "tolerances": {
+    "planet_longitude_degrees": 0.01,
+    "lagna_sign": "exact",
+    "moon_nakshatra_pada": "exact"
+  }
+}
+```
+
+### Ground Rules for Assertions
+* Any field set to `null` is **skipped**, never guessed.
+* For synthetic fixtures, expectations are verified within $\pm 0.01^\circ$ of the Swiss Ephemeris direct call.
+* For third-party tool comparisons (e.g. Hamro Patro), signs and nakshatra/pada are checked for exact matches, and convention variances (ayanamsha epoch, mean vs true nodes) are accounted for as user settings.

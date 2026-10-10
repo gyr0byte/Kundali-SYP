@@ -1,0 +1,94 @@
+{
+  "id": "fixture_north_london",
+  "name": "Northern Hemisphere Synthetic Chart (London)",
+  "source_tool": "Swiss Ephemeris Direct Call",
+  "source_type": "synthetic",
+  "_comment": "Synthetic reference chart computed directly from Swiss Ephemeris v2.10 (DE441). Expectations are from the Swiss Ephemeris direct call, not an independent third-party reference.",
+  "birth": {
+    "date": "2015-05-15",
+    "time": "14:30:00",
+    "latitude": 51.5074,
+    "longitude": -0.1278,
+    "timezone": "Europe/London"
+  },
+  "settings": {
+    "ayanamsha": "lahiri",
+    "house_system": "whole_sign",
+    "node_type": "mean"
+  },
+  "expected": {
+    "lagna": {
+      "sign": "Leo",
+      "longitude": 145.587919,
+      "nakshatra": "Purva Phalguni",
+      "pada": 4
+    },
+    "moon": {
+      "sign": "Pisces",
+      "longitude": 355.366795,
+      "nakshatra": "Revati",
+      "pada": 3
+    },
+    "planets": {
+      "sun": {
+        "sign": "Taurus",
+        "longitude": 30.336599,
+        "house": 10,
+        "retrograde": false
+      },
+      "moon": {
+        "sign": "Pisces",
+        "longitude": 355.366795,
+        "house": 8,
+        "retrograde": false
+      },
+      "mars": {
+        "sign": "Taurus",
+        "longitude": 38.36376,
+        "house": 10,
+        "retrograde": false
+      },
+      "mercury": {
+        "sign": "Taurus",
+        "longitude": 48.574634,
+        "house": 10,
+        "retrograde": false
+      },
+      "jupiter": {
+        "sign": "Cancer",
+        "longitude": 110.533863,
+        "house": 12,
+        "retrograde": false
+      },
+      "venus": {
+        "sign": "Gemini",
+        "longitude": 74.238835,
+        "house": 11,
+        "retrograde": false
+      },
+      "saturn": {
+        "sign": "Scorpio",
+        "longitude": 218.122148,
+        "house": 4,
+        "retrograde": true
+      },
+      "rahu": {
+        "sign": "Virgo",
+        "longitude": 163.739993,
+        "house": 2,
+        "retrograde": true
+      },
+      "ketu": {
+        "sign": "Pisces",
+        "longitude": 343.739993,
+        "house": 8,
+        "retrograde": true
+      }
+    }
+  },
+  "tolerances": {
+    "planet_longitude_degrees": 0.01,
+    "lagna_sign": "exact",
+    "moon_nakshatra_pada": "exact"
+  }
+}
