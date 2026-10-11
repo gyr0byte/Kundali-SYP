@@ -6,7 +6,7 @@ This directory contains architectural specifications and component guides for th
 
 ## Documents Index
 
-* [`calc-engine.md`](calc-engine.md): Complete specification of the deterministic calculation engine, sidereal conventions, thread-safety locking, Chart Facts schema, and third-party benchmark findings.
+* [`calc-engine.md`](calc-engine.md): Specification of the deterministic calculation engine, sidereal conventions, thread-safety locking, Chart Facts schema, and third-party benchmark findings.
 * [`DATABASE_SETUP.md`](DATABASE_SETUP.md): Instructions for provisioning hosted PostgreSQL with `pgvector` (Neon or Supabase), connection security (`sslmode=require`), and current stub status.
 
 ---
