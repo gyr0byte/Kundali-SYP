@@ -1,57 +1,54 @@
 # Database Setup (Hosted PostgreSQL + pgvector)
 
-Kundali uses a **hosted PostgreSQL** instance — no local Docker required.
+Kundali uses a **hosted PostgreSQL** instance — no local Docker daemon is required or supported.
+
+> **Implementation Status:** No database code is implemented or tested yet. All database models (`app/db/models/`), session management (`app/db/session.py`), and migrations (`migrations/`) in this repository are currently stubs. This document describes the planned production and local configuration.
+
+---
 
 ## 1. Create a Hosted Postgres Project
 
-Choose one of:
+Choose a hosted PostgreSQL provider:
+* **Neon** (<https://neon.tech>) — PostgreSQL with native `pgvector` support.
+* **Supabase** (<https://supabase.com>) — PostgreSQL with `pgvector` support.
 
-- **Neon** (<https://neon.tech>) — free tier, pgvector built-in
-- **Supabase** (<https://supabase.com>) — free tier, pgvector available
+Create a new project and copy the connection string.
 
-Sign up and create a new project. Note the connection string.
+---
 
-## 2. Enable pgvector
+## 2. Enable the pgvector Extension
 
-In the hosted provider's **SQL Editor**, run:
-
+In the hosted provider's SQL Editor, execute:
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
+This enables vector embedding storage and similarity search for knowledge chunks.
 
-This enables the `VECTOR` column type used for knowledge-chunk embeddings.
+---
 
 ## 3. Configure the Connection String
 
-Copy the connection string from your provider's dashboard. It will look like:
-
-```
-postgresql://user:password@host:5432/dbname?sslmode=require
-```
-
-Add it to your local `.env` file (never committed):
-
+Set `DATABASE_URL` in your local `.env` file (never committed to git):
 ```env
 DATABASE_URL=postgresql://user:password@host:5432/dbname?sslmode=require
 ```
 
-> **Important:** Always use `sslmode=require` for hosted connections.
+> **Security Rule:** Hosted connections must always use `sslmode=require`.
 
-## 4. Run Migrations
+---
 
+## 4. Run Migrations (When Implemented)
+
+Alembic migration commands (planned once models are implemented):
 ```bash
 cd backend
 alembic upgrade head
 ```
 
-## 5. Development Data
+---
 
-- Use only **fixture or fake birth data** during development.
-- Never use real personal birth data in dev/test environments.
-- Reference chart fixtures live in `fixtures/charts/`.
+## 5. Development Data Guidelines
 
-## Notes
-
-- Column-level encryption for birth data is handled at the application level (Fernet via `cryptography`).
-- The `knowledge_chunks` table uses an HNSW index on the `embedding` column for vector similarity search.
-- See the project plan (Section 11) for the full data model.
+* Use only **synthetic fixtures or fake birth data** during development.
+* Never enter or store real personal birth data in development or test environments.
+* Reference chart test fixtures are located in `fixtures/charts/`.
