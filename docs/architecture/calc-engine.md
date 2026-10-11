@@ -39,30 +39,49 @@ under SWE_LOCK             Retrograde & Speed flags         under SWE_LOCK
 
 ---
 
-## 2. Default Conventions
+## 2. Default Conventions & Presets
 
-1. **Ayanamsha:** `Lahiri` (Chitrapaksha default, `SE_SIDM_LAHIRI`).
-2. **House System:** `Whole Sign` (`b'W'`). The entire 30° zodiac sign containing the Ascendant is House 1; the next sign is House 2, wrapping through House 12.
+1. **Ayanamsha:** Default is `Lahiri` (Chitrapaksha default, `SE_SIDM_LAHIRI`).
+2. **House System:** Default is `Whole Sign` (`b'W'`). The entire 30° zodiac sign containing the Ascendant is House 1; the next sign is House 2, wrapping through House 12.
 3. **Lunar Nodes (Rahu / Ketu):**
    * Default: `Mean Node` (`SE_MEAN_NODE`), per standard textbook convention.
    * Configurable: `True Node` (`SE_TRUE_NODE`), used by popular South Asian apps such as Hamro Patro.
    * Ketu is strictly computed as $(Rahu + 180^\circ) \pmod{360^\circ}$.
    * Both nodes are always flagged as retrograde.
 4. **Presets:** A documented `"hamro_patro_compat"` preset is available (`node_type: TRUE`, `ayanamsha: LAHIRI_1940`), but default remains standard Lahiri and Mean Node.
-5. **Ephemeris Precision:** Swiss Ephemeris compressed `.se1` files (`sepl_18.se1`, `semo_18.se1`, `seas_18.se1`) in `backend/ephe/`. If missing, the library falls back to Moshier analytical mode and reports `"moshier"` in the metadata.
+5. **Ephemeris Data Files:** Swiss Ephemeris .se1 data files from the official repository (`sepl_18.se1`, `semo_18.se1`, `seas_18.se1`) in `backend/ephe/`. If missing, the library falls back to Moshier analytical mode and reports `"moshier"` in the metadata.
+6. **Thread-Safety Lock:** Swiss Ephemeris C-library maintains global sidereal state (`swe_set_sid_mode`). All calls mutating or reading sidereal mode are synchronized under a module-level lock (`SWE_LOCK` in `app/calc/ayanamsha.py`) to guarantee multi-threaded isolation.
 
 ---
 
-## 3. Tool Variance Analysis & Benchmark Audit
+## 3. Chart Facts Schema & Fact IDs
+
+The engine emits an immutable `ChartFacts` document validated via Pydantic v2:
+
+* **Chart Identification:** `chart_id`, `engine_version` (`"0.1.0"`).
+* **Metadata Provenance (`ChartMetadata`):**
+  * `ephemeris_source`: `"swieph"` (when `.se1` files are loaded) or `"moshier"` (fallback mode).
+  * `julian_day`: Julian Day UT float.
+  * `utc_offset_hours`: Explicit UTC offset.
+  * `datetime_utc_iso`: ISO-8601 UTC timestamp.
+* **Stable Fact IDs:**
+  * `f_lagna`: Ascendant fact containing sign, sign index (0-11), degree in sign, absolute longitude, nakshatra, and pada.
+  * `f_sun`, `f_moon`, `f_mars`, `f_mercury`, `f_jupiter`, `f_venus`, `f_saturn`, `f_rahu`, `f_ketu`: Planetary placement facts with sign, sign index, house (1-12), degree in sign, absolute longitude, nakshatra, pada, retrograde flag, and daily speed.
+  * `f_lagna_sensitivity`: Conditional sensitivity fact emitted only when Lagna is within 0.5° of a sign boundary.
+
+---
+
+## 4. Tool Variance Analysis & Benchmark Findings
 
 When Kundali outputs differ from third-party software (e.g. Hamro Patro, Jagannatha Hora, AstroSage), astronomical conventions account for observed differences.
 
 ### Third-Party Benchmark Audit (Hamro Patro)
 
-Regression testing against Hamro Patro reference data (Fixture #1) revealed:
-* **Planetary Longitudes (Sun, Moon, Mars, Mercury, Jupiter, Venus, Rahu, Ketu):** There is a constant offset of about 41 arcseconds under the default Lahiri, reduced to about 11 arcseconds under LAHIRI_1940 with true node; remaining difference unexplained.
-* **Saturn Discrepancy:** Checked externally by the project author on 2026-10-10 (stock pyswisseph in Moshier mode; astropy's built-in ephemeris for Saturn); not reproduced by the repository's tests. Hamro Patro's displayed value matches the engine's position three days later; cause unconfirmed. The discrepancy is explicitly documented and asserted in regression testing (`known_discrepancy: true`).
-* **Lagna Discrepancy:** About 4.1 arcminutes, cause unconfirmed; engine matches stock Swiss Ephemeris. (Birth coordinates were confirmed identical at 87.283°E, 26.45°N, ruling out coordinate differences).
+Regression testing against Hamro Patro reference data revealed:
+* **Planetary Longitudes (Sun, Moon, Mars, Mercury, Jupiter, Venus, Rahu, Ketu):** Constant offset of about 41 arcseconds under default Lahiri, about 11 arcseconds under LAHIRI_1940 with true node; remaining difference unexplained.
+* **Saturn Discrepancy:** Engine matches direct library call; Hamro Patro's displayed value matches the engine's position three days later; cause unconfirmed. The discrepancy is explicitly documented in the private fixture (`known_discrepancy: true`) and asserted to exceed tolerance.
+* **Lagna Discrepancy:** About 4 to 5 arcminutes, cause unconfirmed; engine matches stock Swiss Ephemeris. (Birth coordinates confirmed identical between tools, ruling out coordinate discrepancy).
+* **External Checks:** Checked externally by the project author on 2026-10-10 (stock pyswisseph in Moshier mode; astropy's built-in ephemeris for Saturn); not reproduced by the repository's tests.
 
 | Source of Variation | Typical Discrepancy | Architectural Resolution |
 | :--- | :--- | :--- |

@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kundali Frontend
 
-## Getting Started
+The frontend is a Next.js web application built with the App Router, TypeScript, and Tailwind CSS.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Current Status: Scaffold Only
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+* **Root Page:** The root page (`src/app/page.tsx`) is the unmodified starter page from `create-next-app`.
+* **Route Groups:** Scaffolded route groups exist for three user roles:
+  * `src/app/(user)/page.tsx` — Placeholder returning `<h1>User Panel</h1>`.
+  * `src/app/(astrologer)/page.tsx` — Placeholder returning `<h1>Astrologer Panel</h1>`.
+  * `src/app/(admin)/page.tsx` — Placeholder returning `<h1>Admin Panel</h1>`.
+* **Components & Library:** `src/components/` and `src/lib/` are currently empty. No real interactive pages, chart visualizers, or forms have been implemented.
+* **Internationalization (`next-intl`):** Message dictionary files exist for English (`src/i18n/en.json`) and Nepali (`src/i18n/ne.json`), each containing only two initial keys (`app.title` and `app.description`). Localization routing is not yet integrated.
+* **Quality Verification:** `npm run lint` passes with 0 errors. Note that `npm run build` was not run during validation.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Setup & Development
 
-## Learn More
+All package caches must point to `D:\DevCache`.
 
-To learn more about Next.js, take a look at the following resources:
+1. **Configure Environment:**
+   ```powershell
+   . ..\scripts\env.ps1
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+2. **Install Dependencies:**
+   ```powershell
+   cd frontend
+   npm install
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+3. **Run Development Server:**
+   ```powershell
+   npm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) to view the local scaffold.
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+4. **Run Linter:**
+   ```powershell
+   npm run lint
+   ```
