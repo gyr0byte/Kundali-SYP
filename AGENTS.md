@@ -1,5 +1,9 @@
 # Kundali — Agent Rules
 
+## Current Status
+- Core calculation engine (`app/calc`: timeconv, ayanamsha, ephemeris, houses, nakshatra, facts) is implemented with 40 tests.
+- AI, database, API, background jobs, knowledge, and frontend layers remain stubs or scaffolding. Architectural decisions are documented in `docs/adr/`.
+
 ## Source of Truth
 - The authoritative specification is `docs/Kundali_Project_Plan.md`.
 - **Do not invent features outside that document.**
