@@ -19,7 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Create users, astrologer_profiles, refresh_tokens, password_reset_tokens, and audit_logs tables."""
+    """Create auth and user tables."""
     # 1. users
     op.create_table(
         "users",
@@ -88,7 +88,9 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_refresh_tokens_token_hash"), "refresh_tokens", ["token_hash"], unique=True
     )
-    op.create_index(op.f("ix_refresh_tokens_user_id"), "refresh_tokens", ["user_id"], unique=False)
+    op.create_index(
+        op.f("ix_refresh_tokens_user_id"), "refresh_tokens", ["user_id"], unique=False
+    )
 
     # 4. password_reset_tokens
     op.create_table(
@@ -109,7 +111,10 @@ def upgrade() -> None:
         unique=True,
     )
     op.create_index(
-        op.f("ix_password_reset_tokens_user_id"), "password_reset_tokens", ["user_id"], unique=False
+        op.f("ix_password_reset_tokens_user_id"),
+        "password_reset_tokens",
+        ["user_id"],
+        unique=False,
     )
 
     # 5. audit_logs
