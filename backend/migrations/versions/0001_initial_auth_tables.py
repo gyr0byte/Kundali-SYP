@@ -88,9 +88,7 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_refresh_tokens_token_hash"), "refresh_tokens", ["token_hash"], unique=True
     )
-    op.create_index(
-        op.f("ix_refresh_tokens_user_id"), "refresh_tokens", ["user_id"], unique=False
-    )
+    op.create_index(op.f("ix_refresh_tokens_user_id"), "refresh_tokens", ["user_id"], unique=False)
 
     # 4. password_reset_tokens
     op.create_table(
