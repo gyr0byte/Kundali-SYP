@@ -1,7 +1,7 @@
 """Core FastAPI dependencies for authentication, database, and system services."""
 
 from collections.abc import Generator
-from typing import Any, TypeVar
+from typing import Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
