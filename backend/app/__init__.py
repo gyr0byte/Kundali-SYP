@@ -1,1 +1,1 @@
-﻿"""Kundali backend application."""
+"""Kundali backend application."""

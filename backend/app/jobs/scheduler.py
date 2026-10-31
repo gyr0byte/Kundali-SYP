@@ -1,1 +1,1 @@
-﻿"""APScheduler configuration for transit alert jobs."""
+"""APScheduler configuration for transit alert jobs."""

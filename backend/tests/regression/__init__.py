@@ -1,1 +1,1 @@
-﻿"""Calculation regression tests against reference charts."""
+"""Calculation regression tests against reference charts."""

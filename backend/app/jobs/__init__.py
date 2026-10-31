@@ -1,1 +1,1 @@
-﻿"""Background job definitions."""
+"""Background job definitions."""

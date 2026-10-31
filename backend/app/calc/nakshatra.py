@@ -7,11 +7,33 @@ and 108 padas (quarters, 3° 20' each).
 from __future__ import annotations
 
 NAKSHATRA_NAMES: list[str] = [
-    "Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira", "Ardra",
-    "Punarvasu", "Pushya", "Ashlesha", "Magha", "Purva Phalguni", "Uttara Phalguni",
-    "Hasta", "Chitra", "Swati", "Vishakha", "Anuradha", "Jyeshtha",
-    "Mula", "Purva Ashadha", "Uttara Ashadha", "Shravana", "Dhanishta", "Shatabhisha",
-    "Purva Bhadrapada", "Uttara Bhadrapada", "Revati",
+    "Ashwini",
+    "Bharani",
+    "Krittika",
+    "Rohini",
+    "Mrigashira",
+    "Ardra",
+    "Punarvasu",
+    "Pushya",
+    "Ashlesha",
+    "Magha",
+    "Purva Phalguni",
+    "Uttara Phalguni",
+    "Hasta",
+    "Chitra",
+    "Swati",
+    "Vishakha",
+    "Anuradha",
+    "Jyeshtha",
+    "Mula",
+    "Purva Ashadha",
+    "Uttara Ashadha",
+    "Shravana",
+    "Dhanishta",
+    "Shatabhisha",
+    "Purva Bhadrapada",
+    "Uttara Bhadrapada",
+    "Revati",
 ]
 
 NAKSHATRA_SPAN: float = 360.0 / 27.0  # 13° 20' = 13.333333333333334°

@@ -1,1 +1,1 @@
-﻿"""Adversarial grounding and guardrail tests."""
+"""Adversarial grounding and guardrail tests."""

@@ -9,3 +9,13 @@ source_modules =
     app.calc
 forbidden_modules =
     app.ai
+
+[importlinter:contract:calc-no-framework]
+name = Calculation engine must not import from API, DB, or Core
+type = forbidden
+source_modules =
+    app.calc
+forbidden_modules =
+    app.api
+    app.db
+    app.core

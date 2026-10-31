@@ -1,1 +1,1 @@
-﻿"""Bikram Sambat to/from AD date conversion."""
+"""Bikram Sambat to/from AD date conversion."""

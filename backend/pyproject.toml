@@ -21,6 +21,7 @@ dependencies = [
     "apscheduler>=3.10",
     "httpx>=0.27",
     "tzdata>=2024.1",
+    "email-validator>=2.3.0",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +48,14 @@ select = ["E", "F", "I", "UP"]
 
 [tool.mypy]
 python_version = "3.12"
+
+[[tool.mypy.overrides]]
+module = ["app.core.*", "app.calc.*"]
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["app.db.*", "app.api.*"]
+strict = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

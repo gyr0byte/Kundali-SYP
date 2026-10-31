@@ -1,1 +1,1 @@
-﻿"""Knowledge base ingestion and management."""
+"""Knowledge base ingestion and management."""

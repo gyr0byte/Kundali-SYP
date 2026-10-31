@@ -1,1 +1,1 @@
-﻿"""Provider-agnostic LLM adapter (hosted / local)."""
+"""Provider-agnostic LLM adapter (hosted / local)."""

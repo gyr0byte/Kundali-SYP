@@ -1,1 +1,1 @@
-﻿"""Yoga detection rule evaluator."""
+"""Yoga detection rule evaluator."""

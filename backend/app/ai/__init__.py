@@ -1,1 +1,1 @@
-﻿"""AI interpretation engine (grounded RAG)."""
+"""AI interpretation engine (grounded RAG)."""

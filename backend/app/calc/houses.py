@@ -13,15 +13,33 @@ from swisseph_ffi import SEFLG_SIDEREAL  # type: ignore[import-untyped]
 from app.calc.ayanamsha import _SIDM_MAP, SWE_LOCK, AyanamshaMode, get_swe_engine
 
 SIGN_NAMES: list[str] = [
-    "Aries", "Taurus", "Gemini", "Cancer",
-    "Leo", "Virgo", "Libra", "Scorpio",
-    "Sagittarius", "Capricorn", "Aquarius", "Pisces",
+    "Aries",
+    "Taurus",
+    "Gemini",
+    "Cancer",
+    "Leo",
+    "Virgo",
+    "Libra",
+    "Scorpio",
+    "Sagittarius",
+    "Capricorn",
+    "Aquarius",
+    "Pisces",
 ]
 
 RASHI_NAMES: list[str] = [
-    "Mesha", "Vrishabha", "Mithun", "Karkat",
-    "Singh", "Kanya", "Tula", "Vrishchika",
-    "Dhanu", "Makar", "Kumbha", "Meen",
+    "Mesha",
+    "Vrishabha",
+    "Mithun",
+    "Karkat",
+    "Singh",
+    "Kanya",
+    "Tula",
+    "Vrishchika",
+    "Dhanu",
+    "Makar",
+    "Kumbha",
+    "Meen",
 ]
 
 

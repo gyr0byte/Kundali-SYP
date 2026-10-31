@@ -1,1 +1,1 @@
-﻿"""Kundali Milan (Ashtakoota) endpoints."""
+"""Kundali Milan (Ashtakoota) endpoints."""
