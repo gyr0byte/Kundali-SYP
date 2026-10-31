@@ -6,7 +6,7 @@ from typing import Any
 import jwt
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -17,7 +17,9 @@ from app.main import create_app
 
 
 def test_logout_with_expired_access_token(client: TestClient, user_factory: Any) -> None:
-    """POST /auth/logout uses refresh token to revoke session; it succeeds (204) even if access token is expired."""
+    """POST /auth/logout uses refresh token to revoke session;
+    it succeeds (204) even if access token is expired.
+    """
     user = user_factory(email="logout_expired@example.com", password="SecurePassword2026!")
 
     login_resp = client.post(
@@ -27,13 +29,15 @@ def test_logout_with_expired_access_token(client: TestClient, user_factory: Any)
     assert login_resp.status_code == 200
     refresh_token = login_resp.json()["refresh_token"]
 
+    from datetime import timedelta
+
     # Craft an expired access token
     settings = Settings(JWT_SECRET="x" * 32, DATABASE_URL="sqlite:///:memory:")
     expired_token = create_access_token(
-        data={"sub": str(user.id), "role": user.role.value},
-        secret_key=settings.JWT_SECRET,
-        algorithm=settings.JWT_ALGORITHM,
-        expires_minutes=-10,  # in the past
+        subject=str(user.id),
+        role=user.role.value,
+        secret=settings.JWT_SECRET,
+        expires_delta=timedelta(minutes=-10),  # in the past
     )
 
     resp = client.post(
@@ -56,7 +60,7 @@ def test_unknown_token_logout_idempotent_no_audit(
     db_session: Session,
 ) -> None:
     """Logging out an unknown token returns 204 without leaking state or creating audit rows."""
-    initial_count = db_session.scalar(select(AuditLog).count()) or 0
+    initial_count = db_session.scalar(select(func.count(AuditLog.id))) or 0
 
     fake_token = "non_existent_refresh_token_1234567890abcdef"
     resp = client.post(
@@ -65,7 +69,7 @@ def test_unknown_token_logout_idempotent_no_audit(
     )
     assert resp.status_code == 204
 
-    final_count = db_session.scalar(select(AuditLog).count()) or 0
+    final_count = db_session.scalar(select(func.count(AuditLog.id))) or 0
     assert final_count == initial_count
 
 
@@ -81,8 +85,14 @@ def test_no_passwords_or_tokens_in_audit_metadata(
         json={"email": "audit_hygiene@example.com", "password": secret_pass},
     )
     assert reg_resp.status_code == 201
-    refresh_token = reg_resp.json()["refresh_token"]
-    access_token = reg_resp.json()["access_token"]
+
+    login_resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "audit_hygiene@example.com", "password": secret_pass},
+    )
+    assert login_resp.status_code == 200
+    refresh_token = login_resp.json()["refresh_token"]
+    access_token = login_resp.json()["access_token"]
 
     # Do a refresh and password change
     client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
@@ -95,8 +105,14 @@ def test_no_passwords_or_tokens_in_audit_metadata(
         assert secret_pass.lower() not in meta_str
         assert refresh_token.lower() not in meta_str
         assert access_token.lower() not in meta_str
-        assert "password" not in log_entry.event_metadata or log_entry.event_metadata["password"] == "[REDACTED]"
-        assert "token" not in log_entry.event_metadata or log_entry.event_metadata["token"] == "[REDACTED]"
+        assert (
+            "password" not in log_entry.event_metadata
+            or log_entry.event_metadata["password"] == "[REDACTED]"
+        )
+        assert (
+            "token" not in log_entry.event_metadata
+            or log_entry.event_metadata["token"] == "[REDACTED]"
+        )
 
 
 def test_cors_origin_enforcement(db_session: Session) -> None:
@@ -118,7 +134,9 @@ def test_cors_origin_enforcement(db_session: Session) -> None:
                 "Access-Control-Request-Method": "POST",
             },
         )
-        assert resp_untrusted.headers.get("access-control-allow-origin") != "http://evil-attacker.com"
+        assert (
+            resp_untrusted.headers.get("access-control-allow-origin") != "http://evil-attacker.com"
+        )
 
         # Trusted origin
         resp_trusted = test_client.options(
@@ -146,12 +164,12 @@ def test_jwt_alg_none_and_invalid_signature_rejected(
     user_factory: Any,
 ) -> None:
     """Tokens with alg='none' or forged signature are rejected with 401."""
-    user = user_factory(email="tamper@example.com", role=UserRole.USER)
+    user = user_factory(
+        email="tamper@example.com", password="SecurePassword2026!", role=UserRole.USER
+    )
 
     # 1. alg="none"
-    header = {"alg": "none", "typ": "JWT"}
     payload = {"sub": str(user.id), "role": user.role.value}
-    # Unsigned token: base64(header) + "." + base64(payload) + "."
     none_token = jwt.encode(payload, key="", algorithm="none")
 
     resp_none = client.get("/api/v1/me", headers={"Authorization": f"Bearer {none_token}"})

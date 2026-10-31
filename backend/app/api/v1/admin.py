@@ -67,7 +67,12 @@ def deactivate(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in str(e).lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=status_code, detail=str(e)) from None
 
 
 @router.post("/users/{user_id}/reactivate", status_code=status.HTTP_204_NO_CONTENT)
@@ -85,7 +90,12 @@ def reactivate(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in str(e).lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=status_code, detail=str(e)) from None
 
 
 @router.get("/astrologers", response_model=AstrologerListResponse)
@@ -122,7 +132,12 @@ def approve(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in str(e).lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=status_code, detail=str(e)) from None
 
 
 @router.post("/astrologers/{user_id}/suspend", status_code=status.HTTP_204_NO_CONTENT)
@@ -142,7 +157,12 @@ def suspend(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from None
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in str(e).lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=status_code, detail=str(e)) from None
 
 
 @router.get("/audit", response_model=AuditLogListResponse)

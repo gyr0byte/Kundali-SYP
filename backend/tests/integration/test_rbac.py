@@ -62,21 +62,123 @@ def _get_auth_header(client: TestClient, email: str | None) -> dict[str, str]:
 # (anonymous, user, pending_astro, approved_astro, suspended_astro, admin)
 RBAC_ENDPOINTS = [
     # 1. GET /api/v1/me
-    ("GET", "/api/v1/me", None, {"anonymous": 401, "user": 200, "pending_astrologer": 200, "approved_astrologer": 200, "suspended_astrologer": 200, "admin": 200}),
+    (
+        "GET",
+        "/api/v1/me",
+        None,
+        {
+            "anonymous": 401,
+            "user": 200,
+            "pending_astrologer": 200,
+            "approved_astrologer": 200,
+            "suspended_astrologer": 200,
+            "admin": 200,
+        },
+    ),
     # 2. POST /api/v1/auth/logout-all
-    ("POST", "/api/v1/auth/logout-all", None, {"anonymous": 401, "user": 204, "pending_astrologer": 204, "approved_astrologer": 204, "suspended_astrologer": 204, "admin": 204}),
+    (
+        "POST",
+        "/api/v1/auth/logout-all",
+        None,
+        {
+            "anonymous": 401,
+            "user": 204,
+            "pending_astrologer": 204,
+            "approved_astrologer": 204,
+            "suspended_astrologer": 204,
+            "admin": 204,
+        },
+    ),
     # 3. POST /api/v1/auth/change-password
-    ("POST", "/api/v1/auth/change-password", {"old_password": "SecurePassword2026!", "new_password": "NewSecurePassword2026!"}, {"anonymous": 401, "user": 204, "pending_astrologer": 204, "approved_astrologer": 204, "suspended_astrologer": 204, "admin": 204}),
+    (
+        "POST",
+        "/api/v1/auth/change-password",
+        {"old_password": "SecurePassword2026!", "new_password": "NewSecurePassword2026!"},
+        {
+            "anonymous": 401,
+            "user": 204,
+            "pending_astrologer": 204,
+            "approved_astrologer": 204,
+            "suspended_astrologer": 204,
+            "admin": 204,
+        },
+    ),
     # 4. POST /api/v1/astrologer/apply
-    ("POST", "/api/v1/astrologer/apply", {"bio": "Experienced Vedic astrologer.", "years_experience": 10}, {"anonymous": 401, "user": 201, "pending_astrologer": 400, "approved_astrologer": 403, "suspended_astrologer": 403, "admin": 403}),
+    (
+        "POST",
+        "/api/v1/astrologer/apply",
+        {
+            "display_name": "Pandit Sharma",
+            "credentials": "Jyotish Acharya",
+            "years_experience": 10,
+            "tradition": "Parashari",
+            "bio": "Experienced Vedic astrologer.",
+        },
+        {
+            "anonymous": 401,
+            "user": 201,
+            "pending_astrologer": 400,
+            "approved_astrologer": 400,
+            "suspended_astrologer": 400,
+            "admin": 201,
+        },
+    ),
     # 5. GET /api/v1/review/queue
-    ("GET", "/api/v1/review/queue", None, {"anonymous": 401, "user": 403, "pending_astrologer": 403, "approved_astrologer": 200, "suspended_astrologer": 403, "admin": 200}),
+    (
+        "GET",
+        "/api/v1/review/queue",
+        None,
+        {
+            "anonymous": 401,
+            "user": 403,
+            "pending_astrologer": 403,
+            "approved_astrologer": 200,
+            "suspended_astrologer": 403,
+            "admin": 200,
+        },
+    ),
     # 6. GET /api/v1/admin/users
-    ("GET", "/api/v1/admin/users", None, {"anonymous": 401, "user": 403, "pending_astrologer": 403, "approved_astrologer": 403, "suspended_astrologer": 403, "admin": 200}),
+    (
+        "GET",
+        "/api/v1/admin/users",
+        None,
+        {
+            "anonymous": 401,
+            "user": 403,
+            "pending_astrologer": 403,
+            "approved_astrologer": 403,
+            "suspended_astrologer": 403,
+            "admin": 200,
+        },
+    ),
     # 7. GET /api/v1/admin/astrologers
-    ("GET", "/api/v1/admin/astrologers", None, {"anonymous": 401, "user": 403, "pending_astrologer": 403, "approved_astrologer": 403, "suspended_astrologer": 403, "admin": 200}),
+    (
+        "GET",
+        "/api/v1/admin/astrologers",
+        None,
+        {
+            "anonymous": 401,
+            "user": 403,
+            "pending_astrologer": 403,
+            "approved_astrologer": 403,
+            "suspended_astrologer": 403,
+            "admin": 200,
+        },
+    ),
     # 8. GET /api/v1/admin/audit
-    ("GET", "/api/v1/admin/audit", None, {"anonymous": 401, "user": 403, "pending_astrologer": 403, "approved_astrologer": 403, "suspended_astrologer": 403, "admin": 200}),
+    (
+        "GET",
+        "/api/v1/admin/audit",
+        None,
+        {
+            "anonymous": 401,
+            "user": 403,
+            "pending_astrologer": 403,
+            "approved_astrologer": 403,
+            "suspended_astrologer": 403,
+            "admin": 200,
+        },
+    ),
 ]
 
 
@@ -86,7 +188,14 @@ RBAC_ENDPOINTS = [
 )
 @pytest.mark.parametrize(
     "caller_role",
-    ["anonymous", "user", "pending_astrologer", "approved_astrologer", "suspended_astrologer", "admin"],
+    [
+        "anonymous",
+        "user",
+        "pending_astrologer",
+        "approved_astrologer",
+        "suspended_astrologer",
+        "admin",
+    ],
 )
 def test_rbac_matrix_endpoint(
     client: TestClient,
@@ -101,24 +210,17 @@ def test_rbac_matrix_endpoint(
     email = None if caller_role == "anonymous" else rbac_users[caller_role].email
     headers = _get_auth_header(client, email)
 
-    # For change-password, reset password back after test so other tests with same user work if any
     if method == "GET":
         resp = client.get(endpoint, headers=headers)
     elif method == "POST":
         resp = client.post(endpoint, json=payload, headers=headers)
-        if endpoint == "/api/v1/auth/change-password" and resp.status_code == 204:
-            # Change it back so user remains usable
-            client.post(
-                endpoint,
-                json={"old_password": "NewSecurePassword2026!", "new_password": "SecurePassword2026!"},
-                headers=headers,
-            )
     else:
         raise ValueError(f"Unsupported method: {method}")
 
     expected = expected_statuses[caller_role]
     assert resp.status_code == expected, (
-        f"Expected {expected} for {caller_role} on {method} {endpoint}, got {resp.status_code} ({resp.text})"
+        f"Expected {expected} for {caller_role} on {method} {endpoint}, "
+        f"got {resp.status_code} ({resp.text})"
     )
 
 
@@ -127,8 +229,16 @@ def test_rbac_admin_mutations(
     user_factory: Any,
 ) -> None:
     """Verify non-admin roles cannot mutate users or astrologer statuses."""
-    target_user = user_factory(email="target@example.com", role=UserRole.USER)
-    admin = user_factory(email="matrix_admin@example.com", role=UserRole.ADMIN)
+    target_user = user_factory(
+        email="target@example.com",
+        password="SecurePassword2026!",
+        role=UserRole.USER,
+    )
+    admin = user_factory(
+        email="matrix_admin@example.com",
+        password="SecurePassword2026!",
+        role=UserRole.ADMIN,
+    )
 
     # User cannot deactivate target
     user_headers = _get_auth_header(client, target_user.email)
@@ -138,7 +248,7 @@ def test_rbac_admin_mutations(
     # Admin can deactivate target
     admin_headers = _get_auth_header(client, admin.email)
     resp = client.post(f"/api/v1/admin/users/{target_user.id}/deactivate", headers=admin_headers)
-    assert resp.status_code == 200
+    assert resp.status_code == 204
 
     # Non-existent target returns 404 for admin
     fake_id = uuid.uuid4()
