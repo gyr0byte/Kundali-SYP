@@ -36,10 +36,7 @@ def get_rate_limiter() -> InMemoryRateLimiter:
     return _rate_limiter
 
 
-# Placeholder for get_db; overridden by DB session in app.db.session
-def get_db() -> Generator[Session, None, None]:
-    """Dependency providing a database session. To be overridden or bound to sessionmaker."""
-    raise NotImplementedError("get_db must be implemented by database session provider")
+from app.db.session import get_db
 
 
 def get_current_user(
