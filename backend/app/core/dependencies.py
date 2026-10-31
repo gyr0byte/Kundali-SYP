@@ -93,17 +93,17 @@ def get_current_user(
     return user
 
 
-T = TypeVar("T")
-
-
-def get_owned_or_404(
+def get_owned_or_404[T](
     model: type[T],
     item_id: Any,
     owner_id: Any,
     db: Session,
     owner_field: str = "owner_id",
 ) -> T:
-    """Fetch an item by ID and verify ownership. Returns HTTP 404 for missing or non-owned resources."""
+    """Fetch an item by ID and verify ownership.
+
+    Returns HTTP 404 for missing or non-owned resources.
+    """
     item = db.get(model, item_id)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
