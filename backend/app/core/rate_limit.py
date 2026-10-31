@@ -1,7 +1,6 @@
 """Sliding-window in-memory rate limiter."""
 
 from collections import defaultdict, deque
-from datetime import timedelta
 from threading import Lock
 
 from app.core.clock import Clock, SystemClock

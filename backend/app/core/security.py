@@ -6,9 +6,9 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
-import jwt
 
 # Blocklist of common passwords
 COMMON_PASSWORD_BLOCKLIST: set[str] = {

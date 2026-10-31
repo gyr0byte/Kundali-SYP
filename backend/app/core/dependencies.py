@@ -1,9 +1,9 @@
 """Core FastAPI dependencies for authentication, database, and system services."""
 
-from collections.abc import Callable, Generator
-from typing import Any, Protocol, TypeVar
+from collections.abc import Generator
+from typing import Any, TypeVar
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 

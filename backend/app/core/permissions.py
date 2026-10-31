@@ -1,13 +1,13 @@
 """Role-based access control (RBAC) permissions and role mapping."""
 
-from collections.abc import Callable, Sequence
-from enum import Enum
+from collections.abc import Callable
+from enum import StrEnum
 from typing import Any
 
 from fastapi import HTTPException, status
 
 
-class UserRole(str, Enum):
+class UserRole(StrEnum):
     """User roles supported by the system."""
 
     USER = "user"
@@ -15,7 +15,7 @@ class UserRole(str, Enum):
     ADMIN = "admin"
 
 
-class Permission(str, Enum):
+class Permission(StrEnum):
     """Fine-grained permission identifiers."""
 
     ACCOUNT_SELF = "account:self"
