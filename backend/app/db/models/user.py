@@ -1,7 +1,8 @@
 """User database model."""
 
-from datetime import UTC, datetime
 import uuid
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String, Uuid
@@ -9,6 +10,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.permissions import UserRole
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.db.models.astrologer_profile import AstrologerProfile
+    from app.db.models.password_reset_token import PasswordResetToken
+    from app.db.models.refresh_token import RefreshToken
 
 
 class User(Base):
@@ -26,7 +32,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(
-        sa.Enum(UserRole, native_enum=False),
+        sa.Enum(UserRole, native_enum=False, values_callable=lambda x: [e.value for e in x]),
         default=UserRole.USER,
         nullable=False,
     )
@@ -51,6 +57,7 @@ class User(Base):
     astrologer_profile: Mapped["AstrologerProfile | None"] = relationship(  # type: ignore[name-defined]
         "AstrologerProfile",
         back_populates="user",
+        foreign_keys="[AstrologerProfile.user_id]",
         uselist=False,
         cascade="all, delete-orphan",
     )

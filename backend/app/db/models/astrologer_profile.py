@@ -1,14 +1,18 @@
 """Astrologer profile database model."""
 
-from datetime import DateTime, datetime
-from enum import StrEnum
 import uuid
+from datetime import datetime
+from enum import StrEnum
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from sqlalchemy import CheckConstraint, ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.db.models.user import User
 
 
 class AstrologerStatus(StrEnum):
@@ -39,7 +43,7 @@ class AstrologerProfile(Base):
     credentials: Mapped[str] = mapped_column(Text, nullable=False)
     tradition: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[AstrologerStatus] = mapped_column(
-        sa.Enum(AstrologerStatus, native_enum=False),
+        sa.Enum(AstrologerStatus, native_enum=False, values_callable=lambda x: [e.value for e in x]),
         default=AstrologerStatus.PENDING,
         nullable=False,
     )
