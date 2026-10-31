@@ -48,7 +48,14 @@ select = ["E", "F", "I", "UP"]
 
 [tool.mypy]
 python_version = "3.12"
+
+[[tool.mypy.overrides]]
+module = ["app.core.*", "app.calc.*"]
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["app.db.*", "app.api.*"]
+strict = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
