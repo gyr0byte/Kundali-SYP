@@ -1,1 +1,1 @@
-﻿"""Conceptual-unit chunking with metadata."""
+"""Conceptual-unit chunking with metadata."""

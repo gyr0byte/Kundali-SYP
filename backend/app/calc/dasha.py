@@ -1,1 +1,1 @@
-﻿"""Vimshottari Dasha period computation."""
+"""Vimshottari Dasha period computation."""

@@ -1,1 +1,1 @@
-﻿"""Birth profile CRUD endpoints."""
+"""Birth profile CRUD endpoints."""

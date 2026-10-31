@@ -1,1 +1,1 @@
-﻿"""Pydantic schemas for claims, readings, and LLM output."""
+"""Pydantic schemas for claims, readings, and LLM output."""

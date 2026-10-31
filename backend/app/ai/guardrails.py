@@ -1,1 +1,1 @@
-﻿"""Content guardrails — forbidden categories and safety checks."""
+"""Content guardrails — forbidden categories and safety checks."""

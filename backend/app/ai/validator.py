@@ -1,1 +1,1 @@
-﻿"""Grounding validator — rejects ungrounded claims."""
+"""Grounding validator — rejects ungrounded claims."""

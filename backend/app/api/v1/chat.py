@@ -1,1 +1,1 @@
-﻿"""Grounded AI chat endpoints."""
+"""Grounded AI chat endpoints."""

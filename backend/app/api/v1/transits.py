@@ -1,1 +1,1 @@
-﻿"""Transit and alert endpoints."""
+"""Transit and alert endpoints."""

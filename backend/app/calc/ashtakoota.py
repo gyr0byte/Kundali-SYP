@@ -1,1 +1,1 @@
-﻿"""Ashtakoota (36-point) compatibility scoring."""
+"""Ashtakoota (36-point) compatibility scoring."""

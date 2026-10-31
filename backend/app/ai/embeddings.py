@@ -1,1 +1,1 @@
-﻿"""Embedding generation via sentence-transformers."""
+"""Embedding generation via sentence-transformers."""

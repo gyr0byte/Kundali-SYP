@@ -1,1 +1,1 @@
-﻿"""Transit computation and ingress detection."""
+"""Transit computation and ingress detection."""

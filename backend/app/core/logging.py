@@ -1,1 +1,1 @@
-﻿"""Structured logging configuration."""
+"""Structured logging configuration."""

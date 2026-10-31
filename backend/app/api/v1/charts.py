@@ -1,1 +1,1 @@
-﻿"""Chart generation and retrieval endpoints."""
+"""Chart generation and retrieval endpoints."""

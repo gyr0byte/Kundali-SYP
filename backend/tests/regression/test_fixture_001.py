@@ -34,17 +34,48 @@ EPHE_DIR = PROJECT_ROOT / "backend" / "ephe"
 FIXTURE_PATH = PROJECT_ROOT / "fixtures" / "charts" / "fixture_001_builder.json"
 
 RASHIS = [
-    "Mesha", "Vrishabha", "Mithun", "Karkat",
-    "Singh", "Kanya", "Tula", "Vrishchika",
-    "Dhanu", "Makar", "Kumbha", "Meen",
+    "Mesha",
+    "Vrishabha",
+    "Mithun",
+    "Karkat",
+    "Singh",
+    "Kanya",
+    "Tula",
+    "Vrishchika",
+    "Dhanu",
+    "Makar",
+    "Kumbha",
+    "Meen",
 ]
 
 NAKSHATRAS = [
-    "Ashwini", "Bharani", "Krittika", "Rohini", "Mrigashira", "Ardra",
-    "Punarvasu", "Pushya", "Ashlesha", "Magha", "Purva Phalguni", "Uttara Phalguni",
-    "Hasta", "Chitra", "Swati", "Vishakha", "Anuradha", "Jyeshtha",
-    "Mula", "Purva Ashadha", "Uttara Ashadha", "Shravana", "Dhanishta", "Shatabhisha",
-    "Purva Bhadrapada", "Uttara Bhadrapada", "Revati",
+    "Ashwini",
+    "Bharani",
+    "Krittika",
+    "Rohini",
+    "Mrigashira",
+    "Ardra",
+    "Punarvasu",
+    "Pushya",
+    "Ashlesha",
+    "Magha",
+    "Purva Phalguni",
+    "Uttara Phalguni",
+    "Hasta",
+    "Chitra",
+    "Swati",
+    "Vishakha",
+    "Anuradha",
+    "Jyeshtha",
+    "Mula",
+    "Purva Ashadha",
+    "Uttara Ashadha",
+    "Shravana",
+    "Dhanishta",
+    "Shatabhisha",
+    "Purva Bhadrapada",
+    "Uttara Bhadrapada",
+    "Revati",
 ]
 
 
@@ -71,9 +102,7 @@ def test_ephemeris_files_present() -> None:
         assert file_path.stat().st_size > 50_000, f"Ephemeris file {filename} is unexpectedly small"
 
 
-def test_lagna_and_planetary_positions(
-    swe_engine: SwissEph, fixture_data: dict[str, Any]
-) -> None:
+def test_lagna_and_planetary_positions(swe_engine: SwissEph, fixture_data: dict[str, Any]) -> None:
     """Validate computed positions against fixture reference."""
     # 2006-08-02 02:10:00 Nepal Time (+5:45) -> 2006-08-01 20:25:00 UTC
     jd = swe_engine.swe_julday(2006, 8, 1, 20.0 + 25.0 / 60.0, SE_GREG_CAL)
@@ -128,9 +157,7 @@ def test_lagna_and_planetary_positions(
     assert asc_rashi == positions["lagna"]["sign"]
 
 
-def test_moon_nakshatra_and_pada(
-    swe_engine: SwissEph, fixture_data: dict[str, Any]
-) -> None:
+def test_moon_nakshatra_and_pada(swe_engine: SwissEph, fixture_data: dict[str, Any]) -> None:
     """Validate Moon Nakshatra and Pada match ground truth."""
     jd = swe_engine.swe_julday(2006, 8, 1, 20.0 + 25.0 / 60.0, SE_GREG_CAL)
     xx = (c_double * 6)()

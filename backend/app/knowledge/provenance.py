@@ -1,1 +1,1 @@
-﻿"""Source provenance tracking."""
+"""Source provenance tracking."""
