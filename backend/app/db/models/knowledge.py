@@ -1,1 +1,1 @@
-﻿"""Knowledge source and chunk models."""
+"""Knowledge source and chunk models."""

@@ -1,1 +1,1 @@
-﻿"""Chart and chart_facts models."""
+"""Chart and chart_facts models."""

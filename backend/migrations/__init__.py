@@ -1,1 +1,1 @@
-﻿"""Alembic migration environment."""
+"""Alembic migration environment."""

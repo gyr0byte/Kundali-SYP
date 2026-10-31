@@ -7,8 +7,8 @@ Create Date: 2026-10-31 16:40:00.000000
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
 # Revision identifiers, used by Alembic.
@@ -26,7 +26,11 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("email", sa.String(length=255), nullable=False),
         sa.Column("password_hash", sa.String(length=255), nullable=False),
-        sa.Column("role", sa.Enum("user", "astrologer", "admin", name="user_role", native_enum=False), nullable=False),
+        sa.Column(
+            "role",
+            sa.Enum("user", "astrologer", "admin", name="user_role", native_enum=False),
+            nullable=False,
+        ),
         sa.Column("language", sa.String(length=10), server_default="en", nullable=False),
         sa.Column("is_active", sa.Boolean(), server_default=sa.text("true"), nullable=False),
         sa.Column("failed_login_attempts", sa.Integer(), server_default="0", nullable=False),
@@ -46,10 +50,18 @@ def upgrade() -> None:
         sa.Column("display_name", sa.String(length=100), nullable=False),
         sa.Column("credentials", sa.Text(), nullable=False),
         sa.Column("tradition", sa.Text(), nullable=False),
-        sa.Column("status", sa.Enum("pending", "approved", "suspended", name="astrologer_status", native_enum=False), nullable=False),
+        sa.Column(
+            "status",
+            sa.Enum(
+                "pending", "approved", "suspended", name="astrologer_status", native_enum=False
+            ),
+            nullable=False,
+        ),
         sa.Column("approved_by", sa.Uuid(), nullable=True),
         sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
-        sa.CheckConstraint("status IN ('pending', 'approved', 'suspended')", name="check_astrologer_status"),
+        sa.CheckConstraint(
+            "status IN ('pending', 'approved', 'suspended')", name="check_astrologer_status"
+        ),
         sa.ForeignKeyConstraint(["approved_by"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("user_id"),
@@ -70,8 +82,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_refresh_tokens_family_id"), "refresh_tokens", ["family_id"], unique=False)
-    op.create_index(op.f("ix_refresh_tokens_token_hash"), "refresh_tokens", ["token_hash"], unique=True)
+    op.create_index(
+        op.f("ix_refresh_tokens_family_id"), "refresh_tokens", ["family_id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_refresh_tokens_token_hash"), "refresh_tokens", ["token_hash"], unique=True
+    )
     op.create_index(op.f("ix_refresh_tokens_user_id"), "refresh_tokens", ["user_id"], unique=False)
 
     # 4. password_reset_tokens
@@ -86,8 +102,15 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_password_reset_tokens_token_hash"), "password_reset_tokens", ["token_hash"], unique=True)
-    op.create_index(op.f("ix_password_reset_tokens_user_id"), "password_reset_tokens", ["user_id"], unique=False)
+    op.create_index(
+        op.f("ix_password_reset_tokens_token_hash"),
+        "password_reset_tokens",
+        ["token_hash"],
+        unique=True,
+    )
+    op.create_index(
+        op.f("ix_password_reset_tokens_user_id"), "password_reset_tokens", ["user_id"], unique=False
+    )
 
     # 5. audit_logs
     op.create_table(

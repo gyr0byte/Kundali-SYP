@@ -43,7 +43,9 @@ class AstrologerProfile(Base):
     credentials: Mapped[str] = mapped_column(Text, nullable=False)
     tradition: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[AstrologerStatus] = mapped_column(
-        sa.Enum(AstrologerStatus, native_enum=False, values_callable=lambda x: [e.value for e in x]),
+        sa.Enum(
+            AstrologerStatus, native_enum=False, values_callable=lambda x: [e.value for e in x]
+        ),
         default=AstrologerStatus.PENDING,
         nullable=False,
     )
@@ -58,4 +60,6 @@ class AstrologerProfile(Base):
     )
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="astrologer_profile", foreign_keys=[user_id])  # type: ignore[name-defined]
+    user: Mapped["User"] = relationship(
+        "User", back_populates="astrologer_profile", foreign_keys=[user_id]
+    )  # type: ignore[name-defined]

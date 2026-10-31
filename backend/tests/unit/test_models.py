@@ -1,7 +1,7 @@
 """Unit tests for database models and schema constraints using in-memory SQLite."""
 
-from datetime import UTC, datetime, timedelta
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, select

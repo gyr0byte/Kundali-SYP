@@ -1,8 +1,8 @@
 """Audit log database model for tracking sensitive admin and security events."""
 
+import uuid
 from datetime import UTC, datetime
 from typing import Any
-import uuid
 
 from sqlalchemy import DateTime, ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
