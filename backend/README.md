@@ -6,8 +6,14 @@ The backend provides the deterministic astronomical calculation engine for Kunda
 
 ## Status
 
-* **Implemented:** Astronomical calculation pipeline (`app/calc`: `timeconv`, `ayanamsha`, `ephemeris`, `houses`, `nakshatra`, `facts`) covered by 40 tests (33 unit, 7 regression).
-* **Stubs:** Dasha (`dasha.py`), transits (`transits.py`), yogas (`yogas.py`), compatibility (`ashtakoota.py`), calendar conversion (`bikram_sambat.py`), AI interpretation layer (`app/ai/`), database models (`app/db/`), API routes (`app/api/`), background jobs (`app/jobs/`), and knowledge ingestion (`app/knowledge/`) are currently stubs.
+* **Implemented:**
+  * Astronomical calculation pipeline (`app/calc`: `timeconv`, `ayanamsha`, `ephemeris`, `houses`, `nakshatra`, `facts`).
+  * Core configuration and cryptographic security (`app/core`: `config`, `security`, `permissions`, `rate_limit`, `mailer`, `clock`, `dependencies`).
+  * Authentication, user management, astrologer credentialing, and audit logging services (`app/services`).
+  * Database ORM models (`app/db/models`: `User`, `AstrologerProfile`, `RefreshToken`, `PasswordResetToken`, `AuditLog`) and initial Alembic migration (`migrations/versions/0001_initial_auth_tables.py`).
+  * API v1 routers (`app/api/v1`: `auth`, `admin`, `astrologer`) and FastAPI application entry point (`app/main.py`).
+  * Covered by 161 automated tests (unit, regression, and integration).
+* **Stubs:** Dasha (`dasha.py`), transits (`transits.py`), yogas (`yogas.py`), compatibility (`ashtakoota.py`), calendar conversion (`bikram_sambat.py`), AI interpretation layer (`app/ai/`), background jobs (`app/jobs/`), knowledge ingestion (`app/knowledge/`), and non-auth API routes (`charts.py`, `chat.py`, `milan.py`, `profiles.py`, `transits.py`) are currently stubs.
 
 ---
 
@@ -49,17 +55,21 @@ The calculation engine uses Swiss Ephemeris .se1 data files from the official re
 Run all checks from the `backend/` directory:
 
 ```powershell
-# 1. Run test suite (40 tests: 33 unit, 7 regression)
+# 1. Run test suite (161 tests: unit, regression, integration)
 uv run pytest
 
 # 2. Linting and code style checks
 uv run ruff check .
+uv run ruff format --check .
 
-# 3. Type checking (Note: strictly covers app/calc only)
-uv run mypy --strict app/calc
+# 3. Type checking (configured per module in pyproject.toml)
+uv run mypy app/core app/calc app/db app/api app/services app/main.py
 
-# 4. Architecture boundary check
+# 4. Architecture boundary checks
 uv run lint-imports
 ```
 
-> **Architecture Boundary Rule:** `app/calc/` must **NEVER** import from `app/ai/`. This is enforced automatically by `lint-imports` via `backend/.importlinter`.
+> **Architecture Boundary Rules:**
+> - `app.calc` must **NEVER** import from `app.ai`.
+> - `app.calc` must **NEVER** import from `app.api`, `app.db`, or `app.core`.
+> These boundaries are enforced automatically by `lint-imports` via `backend/.importlinter`.

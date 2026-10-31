@@ -22,14 +22,19 @@ The core idea is "Compute First, Interpret Second". Every planetary position and
 | | `app/calc/yogas.py` (Yoga combination evaluation) | STUB |
 | | `app/calc/bikram_sambat.py` (Bikram Sambat calendar conversion) | STUB |
 | | `app/calc/divisional.py` (Divisional charts D9, etc.) | STUB |
+| **Core & Security** | `app/core/*` (Config, Argon2id, JWT, RBAC, Rate Limiter, Mailer, Clock) | IMPLEMENTED |
+| **Auth Services** | `app/services/*` (Auth, User management, Astrologer credentials, Audit) | IMPLEMENTED |
+| **Database & Models** | `app/db/models/*` (User, AstrologerProfile, RefreshToken, ResetToken, AuditLog) | IMPLEMENTED |
+| | `migrations/versions/0001_initial_auth_tables.py` (Auth schema migration) | IMPLEMENTED (written, not run) |
+| **API Layer** | `app/main.py`, `app/api/v1/auth.py`, `admin.py`, `astrologer.py` (/review/queue) | IMPLEMENTED |
+| | `app/api/v1/charts.py`, `chat.py`, `milan.py`, `profiles.py`, `transits.py` | STUB |
 | **AI Layer** | `app/ai/*` (Embeddings, retrieval, prompts, guardrails, validator) | STUB |
-| **Database & Models** | `app/db/models/*`, `app/db/*` (ORM models, session factory, migrations) | STUB |
-| **API Layer** | `app/main.py`, `app/api/v1/*` (FastAPI routes for charts, chat, admin) | STUB |
 | **Background Jobs** | `app/jobs/*` (Scheduler, transit alert jobs) | STUB |
 | **Knowledge Base** | `app/knowledge/*` (Chunking, ingestion, provenance tracking) | STUB |
 | **Frontend** | `frontend/src/app/*` (Next.js App Router route groups) | STUB |
 | | `frontend/src/i18n/*` (Message dictionaries `en.json`, `ne.json`) | STUB |
-| **Developer Scripts** | `scripts/chart_cli.py` (Chart calculation command-line interface) | implemented, manual, not covered by tests |
+| **Developer Scripts** | `scripts/create_admin.py` (Create initial administrator account CLI) | IMPLEMENTED |
+| | `scripts/chart_cli.py` (Chart calculation command-line interface) | implemented, manual, not covered by tests |
 | | `scripts/download_ephemeris.py` (Swiss Ephemeris data file downloader) | implemented, manual, not covered by tests |
 | | `scripts/env.ps1` (PowerShell environment setup redirecting to D:) | implemented, manual, not covered by tests |
 | | `scripts/verify_env.ps1` (Environment diagnostics verification) | implemented, manual, not covered by tests |
@@ -45,7 +50,15 @@ The core idea is "Compute First, Interpret Second". Every planetary position and
 * **Immutable Chart Facts Document:** Generates a structured, validated Pydantic v2 document with stable fact IDs (`f_lagna`, `f_sun`..`f_ketu`, `f_lagna_sensitivity`), provenance reporting (`"swieph"` vs `"moshier"`), and byte-for-byte deterministic JSON serialization.
 * **Calculation Presets:** Documented `hamro_patro_compat` preset (`node_type = TRUE`, `ayanamsha = LAHIRI_1940`) alongside the default standard Lahiri and Mean Node conventions.
 * **Developer CLI:** `scripts/chart_cli.py` calculates birth charts and outputs Chart Facts JSON or formatted tables from the terminal.
-* **Automated Test Suite:** 40 passing tests (33 unit tests and 7 regression tests) validating calculation accuracy and regression baselines.
+* **Authentication & Authorization Engine:**
+  * User registration and Argon2id credential authentication with account lockout protection (5 failed attempts/15 min).
+  * Stateless 15-minute HS256 JWT access tokens and rotating 7-day refresh tokens with token family reuse detection.
+  * Authenticated password change and forgot/reset password workflows with dev-only console email output.
+  * Role-Based Access Control (RBAC) covering 12 permissions across User, Astrologer, and Admin tiers.
+  * Admin user management (list, deactivate with self & last-admin protection, reactivate).
+  * Astrologer application submission, review queue access (`/review/queue`), admin approval, and credential suspension.
+  * Structured audit logging with sensitive credential sanitization.
+* **Automated Test Suite:** 161 passing tests (unit, regression, and integration) validating calculation accuracy, security edge cases, and RBAC matrix enforcement.
 
 ---
 
@@ -56,8 +69,7 @@ The core idea is "Compute First, Interpret Second". Every planetary position and
 * **Yogas & Compatibility:** Evaluation rules for classical planetary yogas and Ashtakoota compatibility scoring.
 * **Bikram Sambat Support:** Date conversion routines between Gregorian (AD) and Bikram Sambat (BS).
 * **AI Interpretation Layer:** Retrieval-augmented generation, prompt construction, LLM adapter, and guardrail validation.
-* **Database & Persistence:** SQLAlchemy ORM models, migrations, and database session management.
-* **HTTP API:** FastAPI application endpoints and route handlers.
+* **Non-Auth API Endpoints:** Endpoints for charts, chat, profiles, and transits.
 * **Background Jobs:** Asynchronous transit alerts and scheduled jobs.
 * **Knowledge Ingestion:** Ingestion pipelines and vector chunking for classical texts.
 * **Frontend User Interface:** Interactive chart rendering, panels, and forms. (The frontend root page is currently the unmodified starter page from `create-next-app`).
