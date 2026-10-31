@@ -41,4 +41,4 @@ class RefreshToken(Base):
     )
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="refresh_tokens")  # type: ignore[name-defined]
+    user: Mapped["User"] = relationship("User", back_populates="refresh_tokens")

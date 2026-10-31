@@ -1,9 +1,13 @@
 """Unit tests for create_admin CLI script."""
 
 import os
-from unittest.mock import patch
+import sys
+
+# Ensure project root is in sys.path to import from scripts
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 import pytest
+from scripts.create_admin import create_admin_user
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -11,7 +15,6 @@ from sqlalchemy.pool import StaticPool
 from app.core.permissions import UserRole
 from app.db.base import Base
 from app.db.models import User
-from scripts.create_admin import create_admin_user
 
 
 @pytest.fixture
@@ -37,7 +40,7 @@ def test_create_admin_success(db_session: Session) -> None:
     admin = create_admin_user(
         db=db_session,
         email="superadmin@example.com",
-        password="SuperAdminSecurePass2026!",
+        password="UltraSecureMasterPass2026!",
         for_testing=True,
     )
     assert admin.email == "superadmin@example.com"

@@ -7,14 +7,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.clock import FrozenClock
+from app.core.clock import FrozenClock, ensure_utc
 from app.core.config import Settings
 from app.core.mailer import ConsoleMailer
+from app.core.permissions import UserRole
 from app.db.base import Base
-from app.db.models import RefreshToken, User
+from app.db.models import User
 from app.services.auth_service import (
     authenticate_user,
-    change_password,
     create_token_pair,
     refresh_tokens,
     register_user,
@@ -70,7 +70,7 @@ def test_register_user_success(db_session: Session, clock: FrozenClock) -> None:
     )
     assert user.email == "asha.sharma@example.com"
     assert user.is_active is True
-    assert user.role == "user"
+    assert user.role == UserRole.USER
 
 
 def test_register_user_duplicate_email_fails(db_session: Session, clock: FrozenClock) -> None:
@@ -151,7 +151,7 @@ def test_account_lockout_after_five_failed_attempts(
     u = db_session.query(User).filter_by(email="asha@example.com").one()
     assert u.failed_login_attempts == 5
     assert u.locked_until is not None
-    assert u.locked_until > clock.now()
+    assert ensure_utc(u.locked_until) > clock.now()
 
     # Even with correct password, login must fail while locked
     with pytest.raises(ValueError, match="Invalid email or password"):
@@ -186,9 +186,7 @@ def test_refresh_token_rotation_and_family_reuse_detection(
         for_testing=True,
     )
 
-    access1, refresh1 = create_token_pair(
-        db=db_session, user=user, clock=clock, settings=settings
-    )
+    access1, refresh1 = create_token_pair(db=db_session, user=user, clock=clock, settings=settings)
     assert access1 and refresh1
 
     # Normal rotation: refresh1 -> refresh2
@@ -200,20 +198,14 @@ def test_refresh_token_rotation_and_family_reuse_detection(
 
     # Attempting to use refresh1 AGAIN (replay / token theft attack):
     with pytest.raises(ValueError, match="Invalid or expired refresh token"):
-        refresh_tokens(
-            db=db_session, raw_refresh_token=refresh1, clock=clock, settings=settings
-        )
+        refresh_tokens(db=db_session, raw_refresh_token=refresh1, clock=clock, settings=settings)
 
     # Family revocation check: refresh2 must now ALSO be revoked!
     with pytest.raises(ValueError, match="Invalid or expired refresh token"):
-        refresh_tokens(
-            db=db_session, raw_refresh_token=refresh2, clock=clock, settings=settings
-        )
+        refresh_tokens(db=db_session, raw_refresh_token=refresh2, clock=clock, settings=settings)
 
 
-def test_logout_and_logout_all(
-    db_session: Session, clock: FrozenClock, settings: Settings
-) -> None:
+def test_logout_and_logout_all(db_session: Session, clock: FrozenClock, settings: Settings) -> None:
     """Single token logout vs logout-all."""
     user = register_user(
         db=db_session,
@@ -243,16 +235,12 @@ def test_logout_and_logout_all(
 
     # Now refresh3 fails
     with pytest.raises(ValueError, match="Invalid or expired refresh token"):
-        refresh_tokens(
-            db=db_session, raw_refresh_token=refresh3, clock=clock, settings=settings
-        )
+        refresh_tokens(db=db_session, raw_refresh_token=refresh3, clock=clock, settings=settings)
 
 
-def test_password_reset_flow(
-    db_session: Session, clock: FrozenClock, settings: Settings
-) -> None:
+def test_password_reset_flow(db_session: Session, clock: FrozenClock, settings: Settings) -> None:
     """Password reset request, execution, single-use enforcement, and token expiry."""
-    user = register_user(
+    register_user(
         db=db_session,
         email="asha@example.com",
         password="OldPassword2026!",

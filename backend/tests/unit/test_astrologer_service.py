@@ -1,7 +1,6 @@
 """Unit tests for AstrologerService: application, approval, suspension."""
 
 from datetime import UTC, datetime
-import uuid
 
 import pytest
 from sqlalchemy import create_engine
@@ -43,9 +42,7 @@ def clock() -> FrozenClock:
     return FrozenClock(datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC))
 
 
-def test_astrologer_application_workflow(
-    db_session: Session, clock: FrozenClock
-) -> None:
+def test_astrologer_application_workflow(db_session: Session, clock: FrozenClock) -> None:
     """User applies -> profile created in pending status."""
     user = User(email="applicant@example.com", password_hash="h", role=UserRole.USER)
     admin = User(email="admin@example.com", password_hash="h", role=UserRole.ADMIN)

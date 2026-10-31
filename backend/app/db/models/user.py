@@ -54,19 +54,19 @@ class User(Base):
     )
 
     # Relationships
-    astrologer_profile: Mapped["AstrologerProfile | None"] = relationship(  # type: ignore[name-defined]
+    astrologer_profile: Mapped["AstrologerProfile | None"] = relationship(
         "AstrologerProfile",
         back_populates="user",
         foreign_keys="[AstrologerProfile.user_id]",
         uselist=False,
         cascade="all, delete-orphan",
     )
-    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(  # type: ignore[name-defined]
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         "RefreshToken",
         back_populates="user",
         cascade="all, delete-orphan",
     )
-    reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(  # type: ignore[name-defined]
+    reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
         "PasswordResetToken",
         back_populates="user",
         cascade="all, delete-orphan",

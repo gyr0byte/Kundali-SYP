@@ -35,4 +35,4 @@ class PasswordResetToken(Base):
     )
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="reset_tokens")  # type: ignore[name-defined]
+    user: Mapped["User"] = relationship("User", back_populates="reset_tokens")

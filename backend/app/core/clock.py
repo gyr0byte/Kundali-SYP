@@ -41,3 +41,12 @@ class FrozenClock:
     def advance(self, delta: timedelta) -> None:
         """Advance the clock by a timedelta."""
         self._current_time += delta
+
+
+def ensure_utc(dt: datetime | None) -> datetime | None:
+    """Ensure a datetime is timezone-aware in UTC (normalizes naive SQLite datetimes)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt

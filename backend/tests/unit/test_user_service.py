@@ -1,7 +1,8 @@
-"""Unit tests for UserService: user listing, self-deactivation protection, and last-admin protection."""
+"""Unit tests for UserService: user listing, self-deactivation protection,
+and last-admin protection.
+"""
 
 from datetime import UTC, datetime
-import uuid
 
 import pytest
 from sqlalchemy import create_engine
@@ -69,9 +70,7 @@ def test_self_deactivation_is_prevented(db_session: Session, clock: FrozenClock)
         )
 
 
-def test_last_admin_deactivation_is_prevented(
-    db_session: Session, clock: FrozenClock
-) -> None:
+def test_last_admin_deactivation_is_prevented(db_session: Session, clock: FrozenClock) -> None:
     """Cannot deactivate the sole remaining active administrator."""
     admin = User(email="sole_admin@example.com", password_hash="h", role=UserRole.ADMIN)
     other = User(email="other@example.com", password_hash="h", role=UserRole.USER)
@@ -87,9 +86,7 @@ def test_last_admin_deactivation_is_prevented(
         )
 
 
-def test_deactivate_and_reactivate_user(
-    db_session: Session, clock: FrozenClock
-) -> None:
+def test_deactivate_and_reactivate_user(db_session: Session, clock: FrozenClock) -> None:
     """Deactivating a user disables login; reactivating restores it."""
     u = User(email="asha@example.com", password_hash="h", role=UserRole.USER)
     admin = User(email="admin@example.com", password_hash="h", role=UserRole.ADMIN)

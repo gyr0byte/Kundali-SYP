@@ -91,10 +91,13 @@ def validate_password(password: str, email: str) -> tuple[bool, str | None]:
     if len(local_part) >= 3 and local_part in password.lower():
         return False, "Password cannot contain parts of your email address"
 
-    # Check blocklist
-    for blocked in COMMON_PASSWORD_BLOCKLIST:
-        if blocked in password.lower():
-            return False, "Password is too common or easily guessable"
+    lower_pass = password.lower()
+    if lower_pass in COMMON_PASSWORD_BLOCKLIST:
+        return False, "Password is too common or easily guessable"
+
+    base_word = lower_pass.strip("0123456789!@#$%^&*_-+=?.,")
+    if base_word in COMMON_PASSWORD_BLOCKLIST:
+        return False, "Password is too common or easily guessable"
 
     return True, None
 
