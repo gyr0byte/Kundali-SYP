@@ -2,18 +2,18 @@
 
 from collections.abc import Generator
 from datetime import UTC, datetime
-import uuid
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.clock import FrozenClock
 from app.core.config import Settings
-from app.core.dependencies import get_clock, get_db, get_settings
+from app.core.dependencies import get_clock, get_db, get_rate_limiter, get_settings
 from app.core.permissions import UserRole
+from app.core.rate_limit import InMemoryRateLimiter
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.models import AstrologerProfile, AstrologerStatus, User
@@ -71,9 +71,15 @@ def client(
     def _override_get_settings() -> Settings:
         return test_settings
 
+    rate_limiter = InMemoryRateLimiter(clock=test_clock)
+
+    def _override_get_rate_limiter() -> InMemoryRateLimiter:
+        return rate_limiter
+
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_clock] = _override_get_clock
     app.dependency_overrides[get_settings] = _override_get_settings
+    app.dependency_overrides[get_rate_limiter] = _override_get_rate_limiter
 
     with TestClient(app, base_url="http://localhost:3000") as test_client:
         yield test_client

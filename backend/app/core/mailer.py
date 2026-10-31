@@ -6,9 +6,7 @@ from typing import Protocol
 class Mailer(Protocol):
     """Protocol for sending email notifications."""
 
-    def send_password_reset_email(
-        self, to_email: str, reset_token: str, reset_url: str
-    ) -> None:
+    def send_password_reset_email(self, to_email: str, reset_token: str, reset_url: str) -> None:
         """Send a password reset email to the recipient."""
         ...
 
@@ -19,9 +17,7 @@ class ConsoleMailer:
     def __init__(self, environment: str = "prod") -> None:
         self.environment = environment
 
-    def send_password_reset_email(
-        self, to_email: str, reset_token: str, reset_url: str
-    ) -> None:
+    def send_password_reset_email(self, to_email: str, reset_token: str, reset_url: str) -> None:
         """Print password reset link to stdout if in dev environment."""
         if self.environment == "dev":
             print(

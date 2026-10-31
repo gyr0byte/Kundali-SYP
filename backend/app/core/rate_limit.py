@@ -14,9 +14,7 @@ class InMemoryRateLimiter:
         self._requests: dict[str, deque[float]] = defaultdict(deque)
         self._lock = Lock()
 
-    def check_rate_limit(
-        self, key: str, limit: int, window_seconds: int
-    ) -> tuple[bool, int]:
+    def check_rate_limit(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
         """Check if request for key is permitted under limit within window_seconds.
 
         Returns:

@@ -10,7 +10,7 @@ from app.db.models import AstrologerStatus
 
 def test_admin_user_management(client: TestClient, user_factory: Any) -> None:
     """Admin lists users, deactivates a user, and reactivates a user."""
-    admin = user_factory(email="admin@example.com", role=UserRole.ADMIN)
+    user_factory(email="admin@example.com", role=UserRole.ADMIN)
     user = user_factory(email="asha@example.com", role=UserRole.USER)
 
     # Login as admin
@@ -37,7 +37,7 @@ def test_admin_user_management(client: TestClient, user_factory: Any) -> None:
 
 def test_admin_astrologer_credentialing(client: TestClient, user_factory: Any) -> None:
     """Admin lists astrologers, approves application, and suspends astrologer."""
-    admin = user_factory(email="admin@example.com", role=UserRole.ADMIN)
+    user_factory(email="admin@example.com", role=UserRole.ADMIN)
     astro = user_factory(
         email="astro@example.com",
         role=UserRole.USER,
@@ -67,7 +67,7 @@ def test_admin_astrologer_credentialing(client: TestClient, user_factory: Any) -
 
 def test_admin_audit_logs(client: TestClient, user_factory: Any) -> None:
     """Admin fetches paginated audit logs."""
-    admin = user_factory(email="admin@example.com", role=UserRole.ADMIN)
+    user_factory(email="admin@example.com", role=UserRole.ADMIN)
 
     login_resp = client.post(
         "/api/v1/auth/login",

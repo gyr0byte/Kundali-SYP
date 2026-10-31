@@ -4,7 +4,7 @@ from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
 
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
 
 
 class UserRole(StrEnum):
@@ -71,10 +71,9 @@ def require_role(
     *allowed_roles: UserRole,
 ) -> Callable[..., Any]:
     """Dependency factory checking that the current user has one of the allowed roles."""
+    from app.core.dependencies import get_current_user
 
-    def _role_checker(current_user: Any = None) -> Any:
-        # Note: current_user will be resolved by FastAPI dependency injection
-        # or checked directly when passed.
+    def _role_checker(current_user: Any = Depends(get_current_user)) -> Any:
         if current_user is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -102,8 +101,9 @@ def require_permission(
     permission: Permission,
 ) -> Callable[..., Any]:
     """Dependency factory checking that current user's role has the required permission."""
+    from app.core.dependencies import get_current_user
 
-    def _permission_checker(current_user: Any = None) -> Any:
+    def _permission_checker(current_user: Any = Depends(get_current_user)) -> Any:
         if current_user is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

@@ -1,7 +1,7 @@
 """Administrative panel endpoints."""
 
-from typing import Any
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
@@ -17,7 +17,7 @@ from app.api.schemas.user import (
 from app.core.clock import Clock
 from app.core.dependencies import get_clock, get_current_user, get_db
 from app.core.permissions import UserRole, require_role
-from app.db.models import AstrologerProfile, AstrologerStatus, AuditLog, User
+from app.db.models import AstrologerStatus, AuditLog, User
 from app.services.astrologer_service import (
     approve_astrologer,
     list_astrologers,

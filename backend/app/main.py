@@ -20,7 +20,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Startup validation: App MUST refuse to start without a valid JWT_SECRET
         if not app_settings.JWT_SECRET or len(app_settings.JWT_SECRET.strip()) < 32:
-            raise RuntimeError("Application refused to start: JWT_SECRET must be at least 32 characters")
+            raise RuntimeError(
+                "Application refused to start: JWT_SECRET must be at least 32 characters"
+            )
         yield
 
     app = FastAPI(
