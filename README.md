@@ -31,7 +31,7 @@ The core idea is "Compute First, Interpret Second". Every planetary position and
 | **AI Layer** | `app/ai/*` (Embeddings, retrieval, prompts, guardrails, validator) | STUB |
 | **Background Jobs** | `app/jobs/*` (Scheduler, transit alert jobs) | STUB |
 | **Knowledge Base** | `app/knowledge/*` (Chunking, ingestion, provenance tracking) | STUB |
-| **Frontend** | `frontend/src/app/*` (Next.js App Router route groups) | STUB |
+| **Frontend** | `frontend/src/app/*` (Next.js App Router role page scaffolds) | STUB |
 | | `frontend/src/i18n/*` (Message dictionaries `en.json`, `ne.json`) | STUB |
 | **Developer Scripts** | `scripts/create_admin.py` (Create initial administrator account CLI) | IMPLEMENTED |
 | | `scripts/chart_cli.py` (Chart calculation command-line interface) | implemented, manual, not covered by tests |
