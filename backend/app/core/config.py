@@ -3,6 +3,8 @@
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.security import validate_fernet_key
+
 
 class Settings(BaseSettings):
     """Application settings with environment variable overrides."""
@@ -11,11 +13,16 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     ENVIRONMENT: str = "prod"
     JWT_SECRET: str
     DATABASE_URL: str
+    # Required 32-byte URL-safe base64 Fernet key for at-rest profile encryption.
+    # IMPORTANT: Must remain stable and securely backed up; losing or changing it
+    # without a controlled migration renders encrypted profile data unrecoverable.
+    ENCRYPTION_KEY: str
 
     CORS_ALLOWED_ORIGINS: list[str] = []
 
@@ -32,6 +39,12 @@ class Settings(BaseSettings):
         if not v or len(v.strip()) < 32:
             raise ValueError("JWT_SECRET must be at least 32 characters long")
         return v.strip()
+
+    @field_validator("ENCRYPTION_KEY")
+    @classmethod
+    def validate_encryption_key(cls, v: str) -> str:
+        """Validate that ENCRYPTION_KEY is a valid Fernet key in every environment."""
+        return validate_fernet_key(v)
 
 
 # Global settings instance placeholder (can be initialized with environment or overridden)

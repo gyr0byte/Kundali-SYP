@@ -10,6 +10,7 @@ from app.api.v1.admin import router as admin_router
 from app.api.v1.astrologer import router as astrologer_router
 from app.api.v1.auth import router as auth_router
 from app.core.config import Settings, get_settings
+from app.core.security import validate_fernet_key
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -18,11 +19,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-        # Startup validation: App MUST refuse to start without a valid JWT_SECRET
+        # Startup validation: App MUST refuse to start without valid secrets/keys
         if not app_settings.JWT_SECRET or len(app_settings.JWT_SECRET.strip()) < 32:
             raise RuntimeError(
                 "Application refused to start: JWT_SECRET must be at least 32 characters"
             )
+        try:
+            validate_fernet_key(app_settings.ENCRYPTION_KEY)
+        except ValueError:
+            raise RuntimeError(
+                "Application refused to start: ENCRYPTION_KEY must be a valid Fernet key"
+            ) from None
         yield
 
     app = FastAPI(

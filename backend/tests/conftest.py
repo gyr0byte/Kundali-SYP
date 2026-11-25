@@ -1,5 +1,6 @@
 """Shared pytest fixtures for unit and integration tests."""
 
+import base64
 from collections.abc import Generator
 from datetime import UTC, datetime
 
@@ -26,6 +27,12 @@ def test_clock() -> FrozenClock:
     return FrozenClock(datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC))
 
 
+# Fixed test-only 32-byte URL-safe base64 Fernet key (never use outside tests).
+TEST_ENCRYPTION_KEY: str = base64.urlsafe_b64encode(b"kundali-test-encryption-key-0001").decode(
+    "ascii"
+)
+
+
 @pytest.fixture
 def test_settings() -> Settings:
     """Test configuration settings."""
@@ -33,6 +40,7 @@ def test_settings() -> Settings:
         ENVIRONMENT="test",
         JWT_SECRET="test-secret-key-that-is-at-least-32-chars-long",
         DATABASE_URL="sqlite:///:memory:",
+        ENCRYPTION_KEY=TEST_ENCRYPTION_KEY,
         CORS_ALLOWED_ORIGINS=["http://localhost:3000"],
     )
 

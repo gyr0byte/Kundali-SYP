@@ -23,6 +23,7 @@ from app.services.auth_service import (
     revoke_all_tokens,
     revoke_token,
 )
+from tests.conftest import TEST_ENCRYPTION_KEY
 
 
 @pytest.fixture
@@ -49,6 +50,7 @@ def settings() -> Settings:
     return Settings(
         JWT_SECRET="x" * 32,
         DATABASE_URL="sqlite:///:memory:",
+        ENCRYPTION_KEY=TEST_ENCRYPTION_KEY,
         ENVIRONMENT="test",
     )
 

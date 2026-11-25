@@ -14,6 +14,7 @@ from app.core.permissions import UserRole
 from app.core.security import create_access_token
 from app.db.models.audit_log import AuditLog
 from app.main import create_app
+from tests.conftest import TEST_ENCRYPTION_KEY
 
 
 def test_logout_with_expired_access_token(client: TestClient, user_factory: Any) -> None:
@@ -32,7 +33,11 @@ def test_logout_with_expired_access_token(client: TestClient, user_factory: Any)
     from datetime import timedelta
 
     # Craft an expired access token
-    settings = Settings(JWT_SECRET="x" * 32, DATABASE_URL="sqlite:///:memory:")
+    settings = Settings(
+        JWT_SECRET="x" * 32,
+        DATABASE_URL="sqlite:///:memory:",
+        ENCRYPTION_KEY=TEST_ENCRYPTION_KEY,
+    )
     expired_token = create_access_token(
         subject=str(user.id),
         role=user.role.value,
@@ -120,6 +125,7 @@ def test_cors_origin_enforcement(db_session: Session) -> None:
     settings = Settings(
         JWT_SECRET="x" * 32,
         DATABASE_URL="sqlite:///:memory:",
+        ENCRYPTION_KEY=TEST_ENCRYPTION_KEY,
         CORS_ALLOWED_ORIGINS=["http://trusted-site.com"],
         ENVIRONMENT="test",
     )
@@ -150,13 +156,36 @@ def test_cors_origin_enforcement(db_session: Session) -> None:
 
 
 def test_startup_refusal_without_jwt_secret() -> None:
-    """Application startup lifespan raises RuntimeError if JWT_SECRET is invalid/short."""
+    """Application startup refuses invalid JWT_SECRET or invalid ENCRYPTION_KEY."""
     with pytest.raises(Exception):
-        Settings(JWT_SECRET="too-short", DATABASE_URL="sqlite:///:memory:")
+        Settings(
+            JWT_SECRET="too-short",
+            DATABASE_URL="sqlite:///:memory:",
+            ENCRYPTION_KEY=TEST_ENCRYPTION_KEY,
+        )
 
     # If secret is whitespace or less than 32 chars
     with pytest.raises(ValueError, match="JWT_SECRET must be at least 32 characters"):
-        Settings(JWT_SECRET="short", DATABASE_URL="sqlite:///:memory:")
+        Settings(
+            JWT_SECRET="short",
+            DATABASE_URL="sqlite:///:memory:",
+            ENCRYPTION_KEY=TEST_ENCRYPTION_KEY,
+        )
+
+    # Bypassing Pydantic construction must still fail during app lifespan startup
+    invalid_key = "invalid-fernet-key-do-not-leak"
+    constructed = Settings.model_construct(
+        ENVIRONMENT="test",
+        JWT_SECRET="x" * 32,
+        DATABASE_URL="sqlite:///:memory:",
+        ENCRYPTION_KEY=invalid_key,
+        CORS_ALLOWED_ORIGINS=[],
+    )
+    app = create_app(constructed)
+    with pytest.raises(RuntimeError, match="ENCRYPTION_KEY must be a valid Fernet key") as exc_info:
+        with TestClient(app):
+            pass
+    assert invalid_key not in str(exc_info.value)
 
 
 def test_jwt_alg_none_and_invalid_signature_rejected(
