@@ -66,9 +66,16 @@ const enMessages = JSON.parse(readFileSync(path.join(SRC_ROOT, "i18n/en.json"), 
 const neMessages = JSON.parse(readFileSync(path.join(SRC_ROOT, "i18n/ne.json"), "utf8"));
 const { AuthSessionProvider } = await import("../auth/AuthSessionProvider.tsx");
 const {
+  activateSyntheticSamplePreview,
+  applyLoadedProfiles,
+  applySessionCleared,
   classifyWorkspaceAuthError,
+  createInitialWorkspaceState,
+  createProfileLoadCoordinator,
   fetchWorkspaceProfilesSafely,
   reconcileWorkspaceSessionTransition,
+  resolveActiveProfile,
+  resolveVisibleProfiles,
 } = await import("../../lib/kundali/profile-workflow.ts");
 const { BirthProfileForm } = await import("./BirthProfileForm.tsx");
 const { UserChartWorkspace } = await import("./UserChartWorkspace.tsx");
@@ -356,5 +363,254 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
     assert.equal(fetchAttempted, false);
     assert.equal(rejectedResult.kind, "error");
     assert.match(rejectedResult.message, /Session provider failed unexpectedly/);
+  });
+
+  it("ignores delayed User A profile responses after logout and User B switch without clearing User B loading indicator", async () => {
+    const coordinator = createProfileLoadCoordinator();
+    let workspaceState = createInitialWorkspaceState();
+    let liveSession = { status: "authenticated", ownerKey: "user-A" };
+    let isLoading = false;
+    const errors = [];
+
+    const userAProfile = {
+      id: "prof-a-1",
+      label: "User A Secret Profile",
+      input_calendar: "AD",
+      entered_date: "1990-01-01",
+      date_ad: "1990-01-01",
+      bs_conversion_status: "resolved",
+      time_certainty: "exact",
+      time_local: "09:00",
+      place_name: "Kathmandu",
+      latitude: 27.7172,
+      longitude: 85.324,
+      timezone: "Asia/Kathmandu",
+      is_synthetic_sample: false,
+    };
+    const userBProfile = {
+      ...userAProfile,
+      id: "prof-b-1",
+      label: "User B Chart",
+      place_name: "Pokhara",
+    };
+
+    let releaseUserAFetch;
+    const userAFetchDeferred = new Promise((res) => {
+      releaseUserAFetch = res;
+    });
+    let releaseUserBFetch;
+    const userBFetchDeferred = new Promise((res) => {
+      releaseUserBFetch = res;
+    });
+
+    // 1. User A begins delayed profile-list request
+    coordinator.syncSessionContext({ status: "authenticated", ownerKey: "user-A" });
+    const reqAPromise = coordinator.startLoad({
+      ownerKey: "user-A",
+      getAccessToken: () => "tok-A",
+      getLiveContext: () => liveSession,
+      unavailableFallbackMessage: "Unavailable",
+      fetchList: async () => userAFetchDeferred,
+      onLoadingChange: (v) => {
+        isLoading = v;
+      },
+      onLoaded: (items) => {
+        workspaceState = applyLoadedProfiles(workspaceState, items);
+      },
+      onUnauthenticated: () => {
+        errors.push("unauth-A");
+      },
+      onUnavailable: (msg) => {
+        errors.push(`unavail-A:${msg}`);
+      },
+      onError: (msg) => {
+        errors.push(`err-A:${msg}`);
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(isLoading, true);
+
+    // 2. User A logs out
+    liveSession = { status: "unauthenticated", ownerKey: null };
+    const logoutTransition = coordinator.syncSessionContext({
+      status: "unauthenticated",
+      ownerKey: null,
+    });
+    assert.equal(logoutTransition.shouldClearWorkspace, true);
+    assert.equal(logoutTransition.shouldFetch, false);
+    workspaceState = applySessionCleared(workspaceState);
+    isLoading = false;
+
+    // 3. User B authenticates and begins profile request
+    liveSession = { status: "authenticated", ownerKey: "user-B" };
+    const loginBTransition = coordinator.syncSessionContext({
+      status: "authenticated",
+      ownerKey: "user-B",
+    });
+    assert.equal(loginBTransition.shouldFetch, true);
+    const reqBPromise = coordinator.startLoad({
+      ownerKey: "user-B",
+      getAccessToken: () => "tok-B",
+      getLiveContext: () => liveSession,
+      unavailableFallbackMessage: "Unavailable",
+      fetchList: async () => userBFetchDeferred,
+      onLoadingChange: (v) => {
+        isLoading = v;
+      },
+      onLoaded: (items) => {
+        workspaceState = applyLoadedProfiles(workspaceState, items);
+      },
+      onUnauthenticated: () => {
+        errors.push("unauth-B");
+      },
+      onUnavailable: (msg) => {
+        errors.push(`unavail-B:${msg}`);
+      },
+      onError: (msg) => {
+        errors.push(`err-B:${msg}`);
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(isLoading, true);
+
+    // 4. First test loading-indicator protection: if User A's delayed request resolves while User B
+    // is still loading, it MUST NOT apply User A's data OR clear User B's loading indicator!
+    releaseUserAFetch([userAProfile]);
+    await reqAPromise;
+    assert.equal(isLoading, true);
+    assert.equal(workspaceState.savedProfiles.length, 0);
+
+    // 5. User B completes -> User B's profiles become active and loading ends cleanly
+    releaseUserBFetch([userBProfile]);
+    await reqBPromise;
+    assert.equal(isLoading, false);
+    assert.deepEqual(workspaceState.savedProfiles.map((p) => p.id), ["prof-b-1"]);
+    assert.equal(resolveActiveProfile(workspaceState)?.id, "prof-b-1");
+    assert.equal(coordinator.getSnapshot().loadedOwnerKey, "user-B");
+    assert.deepEqual(errors, []);
+
+    // 6. Exact sequence where User B completes BEFORE User A's delayed response arrives:
+    // User C (or User A again) starts delayed load -> logs out -> User B loads & completes -> delayed arrives AFTERWARD
+    let releaseDelayedFirst;
+    const delayedFirst = new Promise((res) => {
+      releaseDelayedFirst = res;
+    });
+    let releaseSecond;
+    const secondFetch = new Promise((res) => {
+      releaseSecond = res;
+    });
+
+    const c2 = createProfileLoadCoordinator();
+    let state2 = createInitialWorkspaceState();
+    let live2 = { status: "authenticated", ownerKey: "user-A" };
+
+    c2.syncSessionContext({ status: "authenticated", ownerKey: "user-A" });
+    const delayedReq = c2.startLoad({
+      ownerKey: "user-A",
+      getAccessToken: () => "tok-A2",
+      getLiveContext: () => live2,
+      unavailableFallbackMessage: "Unavailable",
+      fetchList: async () => delayedFirst,
+      onLoadingChange: () => {},
+      onLoaded: (items) => {
+        state2 = applyLoadedProfiles(state2, items);
+      },
+      onUnauthenticated: () => {},
+      onUnavailable: () => {},
+      onError: () => {},
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    live2 = { status: "unauthenticated", ownerKey: null };
+    c2.syncSessionContext({ status: "unauthenticated", ownerKey: null });
+    state2 = applySessionCleared(state2);
+
+    live2 = { status: "authenticated", ownerKey: "user-B" };
+    c2.syncSessionContext({ status: "authenticated", ownerKey: "user-B" });
+    const bReq = c2.startLoad({
+      ownerKey: "user-B",
+      getAccessToken: () => "tok-B2",
+      getLiveContext: () => live2,
+      unavailableFallbackMessage: "Unavailable",
+      fetchList: async () => secondFetch,
+      onLoadingChange: () => {},
+      onLoaded: (items) => {
+        state2 = applyLoadedProfiles(state2, items);
+      },
+      onUnauthenticated: () => {},
+      onUnavailable: () => {},
+      onError: () => {},
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    // User B finishes FIRST:
+    releaseSecond([userBProfile]);
+    await bReq;
+    assert.deepEqual(state2.savedProfiles.map((p) => p.id), ["prof-b-1"]);
+
+    // User A's delayed response arrives AFTER User B already completed:
+    releaseDelayedFirst([userAProfile]);
+    await delayedReq;
+    assert.deepEqual(state2.savedProfiles.map((p) => p.id), ["prof-b-1"]);
+    assert.equal(resolveActiveProfile(state2)?.id, "prof-b-1");
+    assert.equal(c2.getSnapshot().loadedOwnerKey, "user-B");
+  });
+
+  it("ignores delayed profile responses arriving after logout while preserving synthetic preview", async () => {
+    const coordinator = createProfileLoadCoordinator();
+    let workspaceState = activateSyntheticSamplePreview(createInitialWorkspaceState());
+    let liveSession = { status: "authenticated", ownerKey: "user-A" };
+
+    const privateProfile = {
+      id: "prof-private-1",
+      label: "Private Chart",
+      input_calendar: "AD",
+      entered_date: "1995-05-05",
+      date_ad: "1995-05-05",
+      bs_conversion_status: "resolved",
+      time_certainty: "exact",
+      time_local: "07:00",
+      place_name: "Kathmandu",
+      latitude: 27.7172,
+      longitude: 85.324,
+      timezone: "Asia/Kathmandu",
+      is_synthetic_sample: false,
+    };
+
+    let releaseSlowFetch;
+    const slowFetch = new Promise((res) => {
+      releaseSlowFetch = res;
+    });
+
+    coordinator.syncSessionContext({ status: "authenticated", ownerKey: "user-A" });
+    const reqP = coordinator.startLoad({
+      ownerKey: "user-A",
+      getAccessToken: () => "tok-A",
+      getLiveContext: () => liveSession,
+      unavailableFallbackMessage: "Unavailable",
+      fetchList: async () => slowFetch,
+      onLoadingChange: () => {},
+      onLoaded: (items) => {
+        workspaceState = applyLoadedProfiles(workspaceState, items);
+      },
+      onUnauthenticated: () => {},
+      onUnavailable: () => {},
+      onError: () => {},
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    // User logs out before response returns
+    liveSession = { status: "unauthenticated", ownerKey: null };
+    coordinator.syncSessionContext({ status: "unauthenticated", ownerKey: null });
+    workspaceState = applySessionCleared(workspaceState);
+
+    // Late response returns AFTER logout -> MUST NOT restore private profiles
+    releaseSlowFetch([privateProfile]);
+    await reqP;
+
+    assert.equal(workspaceState.savedProfiles.length, 0);
+    assert.equal(coordinator.getSnapshot().loadedOwnerKey, null);
+    assert.equal(resolveVisibleProfiles(workspaceState).length, 1);
+    assert.equal(resolveActiveProfile(workspaceState)?.is_synthetic_sample, true);
   });
 });

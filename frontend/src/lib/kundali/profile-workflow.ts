@@ -308,6 +308,284 @@ export async function fetchWorkspaceProfilesSafely(params: {
   }
 }
 
+export interface ProfileLoadCoordinatorSnapshot {
+  generation: number;
+  sessionStatus: WorkspaceSessionStatus;
+  ownerKey: string | null;
+  loadedOwnerKey: string | null;
+}
+
+export interface ProfileLoadCoordinator {
+  getSnapshot(): ProfileLoadCoordinatorSnapshot;
+  syncSessionContext(params: {
+    status: WorkspaceSessionStatus;
+    ownerKey: string | null;
+  }): { shouldClearWorkspace: boolean; shouldFetch: boolean };
+  invalidate(): void;
+  markExplicitAuthSuccess(ownerKey: string, expectedGeneration: number): boolean;
+  isCurrentRequest(params: {
+    requestGeneration: number;
+    ownerKey: string;
+    getLiveContext?: () => { status: WorkspaceSessionStatus; ownerKey: string | null } | null;
+  }): boolean;
+  startLoad(params: {
+    ownerKey: string;
+    getAccessToken?: AccessTokenProvider;
+    fetchList: (resolvedToken: string) => Promise<BirthProfile[]>;
+    getLiveContext?: () => { status: WorkspaceSessionStatus; ownerKey: string | null } | null;
+    unavailableFallbackMessage: string;
+    onLoadingChange: (isLoading: boolean) => void;
+    onLoaded: (items: BirthProfile[]) => void;
+    onUnauthenticated: (message: string | null) => void;
+    onUnavailable: (message: string) => void;
+    onError: (message: string) => void;
+  }): Promise<BirthProfile[] | null>;
+}
+
+/**
+ * Tracks workspace session generation and owner identity across async profile fetches
+ * so stale responses or errors from an earlier user/session can never overwrite the active user.
+ */
+export function createProfileLoadCoordinator(): ProfileLoadCoordinator {
+  let generation = 0;
+  let sessionStatus: WorkspaceSessionStatus = "checking";
+  let currentOwnerKey: string | null = null;
+  let loadedOwnerKey: string | null = null;
+  let activeRequestId = 0;
+  let inFlight: {
+    requestId: number;
+    generation: number;
+    ownerKey: string;
+    promise: Promise<BirthProfile[] | null>;
+  } | null = null;
+
+  function syncSessionContext(params: {
+    status: WorkspaceSessionStatus;
+    ownerKey: string | null;
+  }): { shouldClearWorkspace: boolean; shouldFetch: boolean } {
+    const nextStatus = params.status;
+    if (nextStatus === "unauthenticated") {
+      const hadActiveSession =
+        sessionStatus !== "unauthenticated" ||
+        currentOwnerKey !== null ||
+        loadedOwnerKey !== null ||
+        inFlight !== null;
+      if (hadActiveSession) {
+        generation += 1;
+        inFlight = null;
+      }
+      sessionStatus = "unauthenticated";
+      currentOwnerKey = null;
+      loadedOwnerKey = null;
+      return { shouldClearWorkspace: true, shouldFetch: false };
+    }
+
+    if (nextStatus === "checking") {
+      if (currentOwnerKey !== null && params.ownerKey !== currentOwnerKey) {
+        generation += 1;
+        loadedOwnerKey = null;
+        inFlight = null;
+      }
+      sessionStatus = "checking";
+      currentOwnerKey = params.ownerKey;
+      return { shouldClearWorkspace: false, shouldFetch: false };
+    }
+
+    if (nextStatus === "unavailable") {
+      sessionStatus = "unavailable";
+      return { shouldClearWorkspace: false, shouldFetch: false };
+    }
+
+    const nextOwner = params.ownerKey ?? "session-user";
+    const ownerChanged = currentOwnerKey !== null && currentOwnerKey !== nextOwner;
+    if (ownerChanged || sessionStatus === "unauthenticated") {
+      generation += 1;
+      loadedOwnerKey = null;
+      inFlight = null;
+    }
+    sessionStatus = "authenticated";
+    currentOwnerKey = nextOwner;
+    return {
+      shouldClearWorkspace: ownerChanged,
+      shouldFetch: loadedOwnerKey !== nextOwner,
+    };
+  }
+
+  function invalidate(): void {
+    generation += 1;
+    sessionStatus = "unauthenticated";
+    currentOwnerKey = null;
+    loadedOwnerKey = null;
+    inFlight = null;
+  }
+
+  function markExplicitAuthSuccess(ownerKey: string, expectedGeneration: number): boolean {
+    if (expectedGeneration !== generation || currentOwnerKey !== ownerKey) {
+      return false;
+    }
+    if (sessionStatus === "unauthenticated") {
+      return false;
+    }
+    sessionStatus = "authenticated";
+    return true;
+  }
+
+  function isCurrentRequest(params: {
+    requestGeneration: number;
+    ownerKey: string;
+    getLiveContext?: () => { status: WorkspaceSessionStatus; ownerKey: string | null } | null;
+  }): boolean {
+    if (params.requestGeneration !== generation) {
+      return false;
+    }
+    if (sessionStatus !== "authenticated" || currentOwnerKey !== params.ownerKey) {
+      return false;
+    }
+    const live = params.getLiveContext?.();
+    if (live) {
+      if (live.status !== "authenticated") {
+        return false;
+      }
+      if ((live.ownerKey ?? "session-user") !== params.ownerKey) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function isSameGenerationAndOwner(params: {
+    requestGeneration: number;
+    ownerKey: string;
+    getLiveContext?: () => { status: WorkspaceSessionStatus; ownerKey: string | null } | null;
+  }): boolean {
+    if (params.requestGeneration !== generation || currentOwnerKey !== params.ownerKey) {
+      return false;
+    }
+    const live = params.getLiveContext?.();
+    if (live) {
+      if (live.status === "unauthenticated") {
+        return false;
+      }
+      if (live.ownerKey !== null && (live.ownerKey ?? "session-user") !== params.ownerKey) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function startLoad(params: {
+    ownerKey: string;
+    getAccessToken?: AccessTokenProvider;
+    fetchList: (resolvedToken: string) => Promise<BirthProfile[]>;
+    getLiveContext?: () => { status: WorkspaceSessionStatus; ownerKey: string | null } | null;
+    unavailableFallbackMessage: string;
+    onLoadingChange: (isLoading: boolean) => void;
+    onLoaded: (items: BirthProfile[]) => void;
+    onUnauthenticated: (message: string | null) => void;
+    onUnavailable: (message: string) => void;
+    onError: (message: string) => void;
+  }): Promise<BirthProfile[] | null> {
+    if (inFlight && inFlight.ownerKey === params.ownerKey && inFlight.generation === generation) {
+      return inFlight.promise;
+    }
+
+    const reqGeneration = generation;
+    const reqOwnerKey = params.ownerKey;
+    const reqId = ++activeRequestId;
+
+    let promise: Promise<BirthProfile[] | null> | null = null;
+    promise = (async (): Promise<BirthProfile[] | null> => {
+      await Promise.resolve();
+      if (
+        !isSameGenerationAndOwner({
+          requestGeneration: reqGeneration,
+          ownerKey: reqOwnerKey,
+          getLiveContext: params.getLiveContext,
+        })
+      ) {
+        return null;
+      }
+      if (activeRequestId === reqId) {
+        params.onLoadingChange(true);
+      }
+
+      try {
+        const result = await fetchWorkspaceProfilesSafely({
+          getAccessToken: params.getAccessToken,
+          unavailableFallbackMessage: params.unavailableFallbackMessage,
+          liveSessionStatus: () => params.getLiveContext?.()?.status ?? sessionStatus,
+          fetchList: async (validToken) => {
+            markExplicitAuthSuccess(reqOwnerKey, reqGeneration);
+            return params.fetchList(validToken);
+          },
+        });
+
+        if (result.kind === "loaded") {
+          if (
+            !isCurrentRequest({
+              requestGeneration: reqGeneration,
+              ownerKey: reqOwnerKey,
+              getLiveContext: params.getLiveContext,
+            })
+          ) {
+            return null;
+          }
+          loadedOwnerKey = reqOwnerKey;
+          params.onLoaded(result.items);
+          return result.items;
+        }
+
+        if (
+          !isSameGenerationAndOwner({
+            requestGeneration: reqGeneration,
+            ownerKey: reqOwnerKey,
+            getLiveContext: params.getLiveContext,
+          })
+        ) {
+          return null;
+        }
+
+        if (result.kind === "unauthenticated") {
+          params.onUnauthenticated(result.message);
+          return null;
+        }
+
+        if (result.kind === "unavailable") {
+          params.onUnavailable(result.message);
+          return null;
+        }
+
+        params.onError(result.message);
+        return null;
+      } finally {
+        if (inFlight?.requestId === reqId) {
+          inFlight = null;
+        }
+        if (activeRequestId === reqId) {
+          params.onLoadingChange(false);
+        }
+      }
+    })();
+
+    inFlight = { requestId: reqId, generation: reqGeneration, ownerKey: reqOwnerKey, promise };
+    return promise;
+  }
+
+  return {
+    getSnapshot: () => ({
+      generation,
+      sessionStatus,
+      ownerKey: currentOwnerKey,
+      loadedOwnerKey,
+    }),
+    syncSessionContext,
+    invalidate,
+    markExplicitAuthSuccess,
+    isCurrentRequest,
+    startLoad,
+  };
+}
+
 export function resolveVisibleProfiles(state: ProfileWorkspaceState): BirthProfile[] {
   return state.previewSyntheticSample
     ? [...state.savedProfiles, SAMPLE_NORTH_LONDON_PROFILE]

@@ -122,17 +122,31 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function isValidAuthSessionUser(value: unknown): value is AuthSessionUser {
+function parseValidAuthSessionUser(value: unknown): AuthSessionUser | null {
   if (!isPlainRecord(value)) {
-    return false;
+    return null;
   }
-  return (
-    typeof value.id === "string" &&
-    value.id.trim().length > 0 &&
-    typeof value.email === "string" &&
-    value.email.trim().length > 0 &&
-    typeof value.role === "string"
-  );
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  const email = typeof value.email === "string" ? value.email.trim() : "";
+  const role = typeof value.role === "string" ? value.role.trim() : "";
+  const language = typeof value.language === "string" ? value.language.trim() : "";
+  const isActive = typeof value.is_active === "boolean" ? value.is_active : null;
+  const createdAt = typeof value.created_at === "string" ? value.created_at.trim() : "";
+  if (!id || !email || !role || !language || isActive === null || !createdAt) {
+    return null;
+  }
+  return {
+    id,
+    email,
+    role,
+    language,
+    is_active: isActive,
+    created_at: createdAt,
+  };
+}
+
+function isValidAuthSessionUser(value: unknown): value is AuthSessionUser {
+  return parseValidAuthSessionUser(value) !== null;
 }
 
 function containsForbiddenTokenKey(payload: Record<string, unknown>): boolean {
@@ -291,6 +305,9 @@ export function createAuthSessionManager(
 
   let inFlightBootstrapPromise: Promise<AuthSessionSnapshot> | null = null;
   let inFlightRefreshPromise: Promise<string | null> | null = null;
+  let inTabQueueTail: Promise<void> = Promise.resolve();
+  let sessionEpoch = 0;
+  let pendingLogoutCount = 0;
 
   const listeners = new Set<(snapshot: AuthSessionSnapshot) => void>();
   let snapshotCache: AuthSessionSnapshot = {
@@ -387,8 +404,12 @@ export function createAuthSessionManager(
       return;
     }
     if (parsed.type === "LOGOUT") {
+      sessionEpoch += 1;
       clearMemorySession("unauthenticated", null);
       emit();
+      return;
+    }
+    if (pendingLogoutCount > 0) {
       return;
     }
     installAuthenticatedSession(parsed.accessToken, parsed.user, parsed.expiresAtMs);
@@ -424,15 +445,30 @@ export function createAuthSessionManager(
     }
   }
 
-  async function runWithRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
+  async function runWithSessionOperationLock<T>(operation: () => Promise<T>): Promise<T> {
     const locks = resolveLockManager();
-    if (locks) {
-      return locks.request(AUTH_WEB_LOCK_NAME, operation);
+    const executeLocked = async (): Promise<T> => {
+      if (locks) {
+        return locks.request(AUTH_WEB_LOCK_NAME, operation);
+      }
+      // In-tab fallback when Web Locks API is unsupported: inTabQueueTail strictly serializes
+      // refresh, login, logout, and logout-all within this tab, though cross-tab serialization
+      // cannot be guaranteed without Web Locks support.
+      return operation();
+    };
+
+    const previous = inTabQueueTail;
+    let releaseCurrent!: () => void;
+    inTabQueueTail = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+
+    await previous;
+    try {
+      return await executeLocked();
+    } finally {
+      releaseCurrent();
     }
-    // Fallback when Web Locks API is unavailable: in-tab single-flight promise still
-    // deduplicates concurrent refreshes within this tab, though simultaneous refreshes
-    // across separate browser tabs rely on cookie serialization at the BFF/backend.
-    return operation();
   }
 
   async function callBff(
@@ -500,8 +536,13 @@ export function createAuthSessionManager(
 
   async function executeLockedRefresh(
     force: boolean,
-    tokenSnapshotBeforeLock: string | null
+    tokenSnapshotBeforeLock: string | null,
+    requestEpoch: number
   ): Promise<string | null> {
+    if (pendingLogoutCount > 0 || requestEpoch !== sessionEpoch) {
+      return null;
+    }
+
     // Re-check inside Web Lock: another tab may have completed refresh and broadcast
     // the fresh token via BroadcastChannel while this tab waited on the lock.
     if (!force && isTokenUnexpired(now(), leewayMs) && user !== null) {
@@ -524,6 +565,13 @@ export function createAuthSessionManager(
     }
 
     const upstream = await callBff("/refresh", { method: "POST" });
+    if (pendingLogoutCount > 0 || requestEpoch !== sessionEpoch) {
+      // Logout or session invalidation occurred while refresh was in flight.
+      // Do not install authenticated state or broadcast SESSION_UPDATED;
+      // any queued logout will run next under the lock and revoke the latest cookie.
+      return null;
+    }
+
     if (!upstream) {
       return handleTemporaryRefreshFailure(
         force,
@@ -546,6 +594,7 @@ export function createAuthSessionManager(
     }
 
     if (response.status === 401 || response.status === 403) {
+      sessionEpoch += 1;
       clearMemorySession("unauthenticated", {
         code: readStringField(body, "code", "UNAUTHORIZED"),
         status: response.status,
@@ -559,6 +608,9 @@ export function createAuthSessionManager(
 
     if (response.ok && body?.authenticated === false) {
       const hadActiveState = user !== null || accessToken !== null || hasRecoverableSession;
+      if (hadActiveState) {
+        sessionEpoch += 1;
+      }
       clearMemorySession("unauthenticated", null);
       emit();
       if (hadActiveState) {
@@ -569,8 +621,8 @@ export function createAuthSessionManager(
 
     if (response.ok && body?.authenticated === true) {
       const nextToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
-      const nextUser = body.user;
-      if (nextToken && isValidAuthSessionUser(nextUser)) {
+      const nextUser = parseValidAuthSessionUser(body.user);
+      if (nextToken && nextUser) {
         const nextExpiry =
           typeof body.expires_at_ms === "number" && Number.isFinite(body.expires_at_ms)
             ? body.expires_at_ms
@@ -591,6 +643,10 @@ export function createAuthSessionManager(
   }
 
   async function refreshSession(options: { force?: boolean } = {}): Promise<string | null> {
+    if (pendingLogoutCount > 0) {
+      return null;
+    }
+
     const force = Boolean(options.force);
     if (!force && isTokenUnexpired(now(), leewayMs) && user !== null) {
       if (status !== "authenticated") {
@@ -606,11 +662,12 @@ export function createAuthSessionManager(
     }
 
     const tokenSnapshotBeforeWait = accessToken;
+    const epochAtEnqueue = sessionEpoch;
     let promise: Promise<string | null> | null = null;
     promise = (async () => {
       try {
-        return await runWithRefreshLock(() =>
-          executeLockedRefresh(force, tokenSnapshotBeforeWait)
+        return await runWithSessionOperationLock(() =>
+          executeLockedRefresh(force, tokenSnapshotBeforeWait, epochAtEnqueue)
         );
       } finally {
         if (inFlightRefreshPromise === promise) {
@@ -706,10 +763,19 @@ export function createAuthSessionManager(
 
     const { response, body } = upstream;
     if (response.ok) {
+      const parsedUser = parseValidAuthSessionUser(body);
+      if (!parsedUser) {
+        return {
+          ok: false,
+          status: 502,
+          code: "INVALID_BACKEND_RESPONSE",
+          message: "Received an invalid registration response from authentication service.",
+        };
+      }
       return {
         ok: true,
         status: response.status,
-        user: isValidAuthSessionUser(body?.user) ? body.user : null,
+        user: parsedUser,
       };
     }
 
@@ -723,136 +789,134 @@ export function createAuthSessionManager(
   }
 
   async function login(email: string, password: string): Promise<AuthMutationResult> {
-    const upstream = await callBff("/login", {
-      method: "POST",
-      body: { email, password },
-    });
-    if (!upstream) {
-      return {
-        ok: false,
-        status: 503,
-        code: "BACKEND_UNAVAILABLE",
-        message: "Authentication service is temporarily unavailable.",
-      };
-    }
-
-    const { response, body } = upstream;
-    if (response.ok && body?.authenticated === true) {
-      const nextToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
-      const nextUser = body.user;
-      if (nextToken && isValidAuthSessionUser(nextUser)) {
-        const nextExpiry =
-          typeof body.expires_at_ms === "number" && Number.isFinite(body.expires_at_ms)
-            ? body.expires_at_ms
-            : extractJwtExpiresAtMs(nextToken);
-        installAuthenticatedSession(nextToken, nextUser, nextExpiry);
-        emit();
-        broadcastSessionUpdated();
+    const epochAtStart = sessionEpoch;
+    return runWithSessionOperationLock(async () => {
+      if (pendingLogoutCount > 0 || epochAtStart !== sessionEpoch) {
         return {
-          ok: true,
-          status: 200,
-          user: nextUser,
+          ok: false,
+          status: 409,
+          code: "SESSION_INVALIDATED",
+          message: "Sign-in was superseded by a session sign-out request.",
+          sessionEstablished: false,
+        };
+      }
+
+      const upstream = await callBff("/login", {
+        method: "POST",
+        body: { email, password },
+      });
+      if (!upstream) {
+        return {
+          ok: false,
+          status: 503,
+          code: "BACKEND_UNAVAILABLE",
+          message: "Authentication service is temporarily unavailable.",
+        };
+      }
+
+      const { response, body } = upstream;
+      if (response.ok && body?.authenticated === true) {
+        const nextToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
+        const nextUser = parseValidAuthSessionUser(body.user);
+        if (nextToken && nextUser) {
+          const nextExpiry =
+            typeof body.expires_at_ms === "number" && Number.isFinite(body.expires_at_ms)
+              ? body.expires_at_ms
+              : extractJwtExpiresAtMs(nextToken);
+          sessionEpoch += 1;
+          installAuthenticatedSession(nextToken, nextUser, nextExpiry);
+          emit();
+          broadcastSessionUpdated();
+          return {
+            ok: true,
+            status: 200,
+            user: nextUser,
+            sessionEstablished: true,
+          };
+        }
+      }
+
+      // Controlled single recovery attempt if BFF established the refresh cookie on login
+      // before /me encountered a temporary failure.
+      if (body?.session_established === true) {
+        hasRecoverableSession = true;
+        const recoveryEpoch = sessionEpoch;
+        const recoveredToken = await executeLockedRefresh(true, null, recoveryEpoch);
+        if (recoveredToken && user) {
+          return {
+            ok: true,
+            status: 200,
+            user,
+            sessionEstablished: true,
+          };
+        }
+        return {
+          ok: false,
+          status: response.status,
+          code: "SESSION_RECOVERY_UNAVAILABLE",
+          message:
+            error?.message ??
+            "Sign-in cookie was saved, but session profile could not be loaded yet. Please retry.",
           sessionEstablished: true,
         };
       }
-    }
 
-    // Controlled single recovery attempt if BFF established the refresh cookie on login
-    // before /me encountered a temporary failure.
-    if (body?.session_established === true) {
-      hasRecoverableSession = true;
-      const recoveredToken = await refreshSession({ force: true });
-      if (recoveredToken && user) {
-        return {
-          ok: true,
-          status: 200,
-          user,
-          sessionEstablished: true,
-        };
-      }
       return {
         ok: false,
         status: response.status,
-        code: "SESSION_RECOVERY_UNAVAILABLE",
-        message:
-          error?.message ??
-          "Sign-in cookie was saved, but session profile could not be loaded yet. Please retry.",
-        sessionEstablished: true,
+        code: readStringField(body, "code", "LOGIN_FAILED"),
+        message: readStringField(body, "message", "Sign in could not be completed."),
+        validationMessages: readValidationMessages(body),
+        sessionEstablished: false,
       };
-    }
-
-    return {
-      ok: false,
-      status: response.status,
-      code: readStringField(body, "code", "LOGIN_FAILED"),
-      message: readStringField(body, "message", "Sign in could not be completed."),
-      validationMessages: readValidationMessages(body),
-      sessionEstablished: false,
-    };
+    });
   }
 
   async function logout(): Promise<LogoutResult> {
-    clearMemorySession("unauthenticated", null);
-    emit();
-    broadcastLogout();
+    pendingLogoutCount += 1;
+    sessionEpoch += 1;
 
-    const upstream = await callBff("/logout", { method: "POST" });
-    if (!upstream) {
-      return {
-        localCookieCleared: false,
-        backendLogoutRequestCompleted: false,
-        backendRevocationState: "network_error",
-      };
+    try {
+      return await runWithSessionOperationLock(async () => {
+        const upstream = await callBff("/logout", { method: "POST" });
+
+        clearMemorySession("unauthenticated", null);
+        emit();
+        // Broadcast final LOGOUT after lock-protected cookie clearing completes so any
+        // earlier refresh cannot immediately re-authenticate peer tabs.
+        broadcastLogout();
+
+        if (!upstream) {
+          return {
+            localCookieCleared: false,
+            backendLogoutRequestCompleted: false,
+            backendRevocationState: "network_error",
+          };
+        }
+
+        const { body } = upstream;
+        const rawState = body?.backend_revocation_state;
+        const backendRevocationState: LogoutResult["backendRevocationState"] =
+          rawState === "logout_request_accepted" ||
+          rawState === "missing_cookie" ||
+          rawState === "backend_unconfirmed"
+            ? rawState
+            : "backend_unconfirmed";
+
+        return {
+          localCookieCleared: body?.local_cookie_cleared === true,
+          backendLogoutRequestCompleted: body?.backend_logout_request_completed === true,
+          backendRevocationState,
+        };
+      });
+    } finally {
+      pendingLogoutCount = Math.max(0, pendingLogoutCount - 1);
     }
-
-    const { body } = upstream;
-    const rawState = body?.backend_revocation_state;
-    const backendRevocationState: LogoutResult["backendRevocationState"] =
-      rawState === "logout_request_accepted" ||
-      rawState === "missing_cookie" ||
-      rawState === "backend_unconfirmed"
-        ? rawState
-        : "backend_unconfirmed";
-
-    return {
-      localCookieCleared: body?.local_cookie_cleared === true,
-      backendLogoutRequestCompleted: body?.backend_logout_request_completed === true,
-      backendRevocationState,
-    };
   }
 
-  async function logoutAll(): Promise<LogoutAllResult> {
-    let token = await getAccessToken();
-    if (!token) {
-      return {
-        ok: false,
-        status: 401,
-        localCookieCleared: false,
-        backendLogoutRequestCompleted: false,
-        backendRevocationState: "unauthenticated",
-        message: "Authentication required before revoking all sessions.",
-      };
-    }
-
-    let upstream = await callBff("/logout-all", { method: "POST", bearerToken: token });
-    if (upstream && upstream.response.status === 401) {
-      const refreshedToken = await refreshOnUnauthorized(token);
-      if (!refreshedToken) {
-        return {
-          ok: false,
-          status: status === "unavailable" ? 503 : 401,
-          localCookieCleared: false,
-          backendLogoutRequestCompleted: false,
-          backendRevocationState:
-            status === "unavailable" ? "backend_unconfirmed" : "unauthenticated",
-          message:
-            error?.message ?? "Session could not be refreshed to confirm global sign-out.",
-        };
-      }
-      token = refreshedToken;
-      upstream = await callBff("/logout-all", { method: "POST", bearerToken: token });
-    }
-
+  function buildFailedLogoutAllResult(
+    upstream: { response: Response; body: Record<string, unknown> | null } | null
+  ): LogoutAllResult {
     if (!upstream) {
       return {
         ok: false,
@@ -865,23 +929,6 @@ export function createAuthSessionManager(
     }
 
     const { response, body } = upstream;
-    if (
-      response.ok &&
-      body?.local_cookie_cleared === true &&
-      body?.backend_logout_request_completed === true
-    ) {
-      clearMemorySession("unauthenticated", null);
-      emit();
-      broadcastLogout();
-      return {
-        ok: true,
-        status: response.status,
-        localCookieCleared: true,
-        backendLogoutRequestCompleted: true,
-        backendRevocationState: "all_refresh_tokens_revoked",
-      };
-    }
-
     const rawState = body?.backend_revocation_state;
     const backendRevocationState: LogoutAllResult["backendRevocationState"] =
       rawState === "unauthenticated" ||
@@ -902,6 +949,132 @@ export function createAuthSessionManager(
         "Unable to confirm revocation of all active sessions."
       ),
     };
+  }
+
+  function completeConfirmedLogoutAll(httpStatus: number): LogoutAllResult {
+    sessionEpoch += 1;
+    clearMemorySession("unauthenticated", null);
+    emit();
+    broadcastLogout();
+    return {
+      ok: true,
+      status: httpStatus,
+      localCookieCleared: true,
+      backendLogoutRequestCompleted: true,
+      backendRevocationState: "all_refresh_tokens_revoked",
+    };
+  }
+
+  async function logoutAll(): Promise<LogoutAllResult> {
+    const token = await getAccessToken();
+    if (!token) {
+      return {
+        ok: false,
+        status: 401,
+        localCookieCleared: false,
+        backendLogoutRequestCompleted: false,
+        backendRevocationState: "unauthenticated",
+        message: "Authentication required before revoking all sessions.",
+      };
+    }
+
+    const firstAttempt = await runWithSessionOperationLock(
+      async (): Promise<
+        | { kind: "done"; result: LogoutAllResult }
+        | { kind: "retry401"; failedToken: string }
+      > => {
+        if (
+          pendingLogoutCount > 0 ||
+          (status === "unauthenticated" && !hasRecoverableSession && accessToken === null)
+        ) {
+          return {
+            kind: "done",
+            result: {
+              ok: false,
+              status: 401,
+              localCookieCleared: false,
+              backendLogoutRequestCompleted: false,
+              backendRevocationState: "unauthenticated",
+              message: "Authentication required before revoking all sessions.",
+            },
+          };
+        }
+
+        const activeToken =
+          accessToken && isTokenUnexpired(now(), leewayMs) ? accessToken : token;
+        const upstream = await callBff("/logout-all", {
+          method: "POST",
+          bearerToken: activeToken,
+        });
+
+        if (
+          upstream &&
+          upstream.response.ok &&
+          upstream.body?.local_cookie_cleared === true &&
+          upstream.body?.backend_logout_request_completed === true
+        ) {
+          return { kind: "done", result: completeConfirmedLogoutAll(upstream.response.status) };
+        }
+
+        if (upstream && upstream.response.status === 401) {
+          return { kind: "retry401", failedToken: activeToken };
+        }
+
+        return { kind: "done", result: buildFailedLogoutAllResult(upstream) };
+      }
+    );
+
+    if (firstAttempt.kind === "done") {
+      return firstAttempt.result;
+    }
+
+    // Lock has been released: refresh once before re-acquiring the lock for the single retry.
+    const refreshedToken = await refreshOnUnauthorized(firstAttempt.failedToken);
+    if (!refreshedToken) {
+      return {
+        ok: false,
+        status: status === "unavailable" ? 503 : 401,
+        localCookieCleared: false,
+        backendLogoutRequestCompleted: false,
+        backendRevocationState:
+          status === "unavailable" ? "backend_unconfirmed" : "unauthenticated",
+        message:
+          error?.message ?? "Session could not be refreshed to confirm global sign-out.",
+      };
+    }
+
+    return runWithSessionOperationLock(async () => {
+      if (
+        pendingLogoutCount > 0 ||
+        (status === "unauthenticated" && !hasRecoverableSession && accessToken === null)
+      ) {
+        return {
+          ok: false,
+          status: 401,
+          localCookieCleared: false,
+          backendLogoutRequestCompleted: false,
+          backendRevocationState: "unauthenticated",
+          message: "Session was invalidated before logout-all retry completed.",
+        };
+      }
+
+      const finalToken = accessToken ?? refreshedToken;
+      const retryUpstream = await callBff("/logout-all", {
+        method: "POST",
+        bearerToken: finalToken,
+      });
+
+      if (
+        retryUpstream &&
+        retryUpstream.response.ok &&
+        retryUpstream.body?.local_cookie_cleared === true &&
+        retryUpstream.body?.backend_logout_request_completed === true
+      ) {
+        return completeConfirmedLogoutAll(retryUpstream.response.status);
+      }
+
+      return buildFailedLogoutAllResult(retryUpstream);
+    });
   }
 
   return {

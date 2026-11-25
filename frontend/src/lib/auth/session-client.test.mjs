@@ -327,12 +327,15 @@ describe("In-memory session bootstrap, login recovery, and storage isolation", (
     unavailableManager.dispose();
   });
 
-  it("keeps registration decoupled from automatic sign-in", async () => {
+  it("keeps registration decoupled from automatic sign-in and maps root UserResponse DTO", async () => {
+    const requestedUrls = [];
     const manager = createAuthSessionManager({
       locks: null,
       fetchImpl: async (url) => {
+        requestedUrls.push(url);
         assert.equal(url, "/api/auth/register");
-        return new Response(JSON.stringify({ user: SAMPLE_USER }), {
+        // Exact BFF 201 root-level UserResponse contract
+        return new Response(JSON.stringify(SAMPLE_USER), {
           status: 201,
           headers: { "content-type": "application/json" },
         });
@@ -342,9 +345,26 @@ describe("In-memory session bootstrap, login recovery, and storage isolation", (
     const res = await manager.register("asha@example.com", "ValidPass123!");
     assert.equal(res.ok, true);
     assert.equal(res.status, 201);
+    assert.deepEqual(res.user, SAMPLE_USER);
     assert.equal(manager.getSnapshot().isAuthenticated, false);
     assert.equal(manager.getSnapshot().status, "checking");
+    assert.deepEqual(requestedUrls, ["/api/auth/register"]);
+
+    // Rejects malformed 201 payloads that omit required UserResponse fields
+    const badManager = createAuthSessionManager({
+      locks: null,
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ id: "only-id" }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    const badRes = await badManager.register("asha@example.com", "ValidPass123!");
+    assert.equal(badRes.ok, false);
+    assert.equal(badRes.code, "INVALID_BACKEND_RESPONSE");
+
     manager.dispose();
+    badManager.dispose();
   });
 });
 
@@ -658,5 +678,514 @@ describe("logout and logoutAll truthfulness", () => {
 
     manager.dispose();
     peerTab.dispose();
+  });
+});
+
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe("Logout vs refresh lock serialization and race protection", () => {
+  it("serializes logout after an in-flight cross-tab refresh so rotated cookie R2 is revoked cleanly and delayed SESSION_UPDATED cannot reauthenticate", async () => {
+    const nowMs = 1_700_000_000_000;
+    const t1 = makeJwtWithExp(Math.floor((nowMs + 600_000) / 1000));
+    const t2 = makeJwtWithExp(Math.floor((nowMs + 900_000) / 1000));
+    const bus = createMemoryBroadcastBus();
+    const lockManager = createFakeLockManager();
+
+    let cookieJarRefresh = "R1";
+    const activeRefreshTokens = new Set(["R1"]);
+    const timeline = [];
+    const refreshDeferred = createDeferred();
+
+    const sharedFetch = async (url) => {
+      if (url === "/api/auth/login") {
+        cookieJarRefresh = "R1";
+        activeRefreshTokens.add("R1");
+        return new Response(
+          JSON.stringify({
+            authenticated: true,
+            access_token: t1,
+            expires_at_ms: nowMs + 600_000,
+            user: SAMPLE_USER,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url === "/api/auth/refresh") {
+        const usedCookie = cookieJarRefresh;
+        timeline.push(`refresh:start:${usedCookie}`);
+        await refreshDeferred.promise;
+        if (!usedCookie || !activeRefreshTokens.has(usedCookie)) {
+          timeline.push("refresh:unauth");
+          return new Response(JSON.stringify({ authenticated: false }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        activeRefreshTokens.delete(usedCookie);
+        cookieJarRefresh = "R2";
+        activeRefreshTokens.add("R2");
+        timeline.push("refresh:end:R2");
+        return new Response(
+          JSON.stringify({
+            authenticated: true,
+            access_token: t2,
+            expires_at_ms: nowMs + 900_000,
+            user: SAMPLE_USER,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url === "/api/auth/logout") {
+        const revoked = cookieJarRefresh;
+        timeline.push(`logout:start:${revoked}`);
+        if (revoked) {
+          activeRefreshTokens.delete(revoked);
+        }
+        cookieJarRefresh = null;
+        timeline.push(`logout:end:${revoked}`);
+        return new Response(
+          JSON.stringify({
+            local_cookie_cleared: true,
+            backend_logout_request_completed: true,
+            backend_revocation_state: "logout_request_accepted",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    };
+
+    const tabA = createAuthSessionManager({
+      now: () => nowMs,
+      locks: lockManager,
+      broadcastChannelFactory: bus.factory,
+      fetchImpl: sharedFetch,
+    });
+    const tabB = createAuthSessionManager({
+      now: () => nowMs,
+      locks: lockManager,
+      broadcastChannelFactory: bus.factory,
+      fetchImpl: sharedFetch,
+    });
+
+    await tabB.login("asha@example.com", "ValidPass123!");
+    assert.equal(tabA.getSnapshot().status, "authenticated");
+
+    // 1. Tab B begins forced refresh (R1 -> R2), stalled on refreshDeferred inside lock.
+    const refreshP = tabB.refreshSession({ force: true });
+    await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(timeline, ["refresh:start:R1"]);
+
+    // 2. Tab A starts logout while Tab B's refresh is still holding the lock.
+    const logoutP = tabA.logout();
+    await new Promise((r) => setTimeout(r, 5));
+    // Logout MUST wait for the in-flight refresh lock before sending /api/auth/logout!
+    assert.deepEqual(timeline, ["refresh:start:R1"]);
+
+    // 3. Refresh settles -> rotates R1->R2 -> releases lock -> Logout enters lock and revokes R2!
+    refreshDeferred.resolve();
+    const [, logoutResult] = await Promise.all([refreshP, logoutP]);
+
+    assert.equal(logoutResult.localCookieCleared, true);
+    assert.equal(logoutResult.backendRevocationState, "logout_request_accepted");
+    assert.deepEqual(timeline, [
+      "refresh:start:R1",
+      "refresh:end:R2",
+      "logout:start:R2",
+      "logout:end:R2",
+    ]);
+    assert.equal(cookieJarRefresh, null);
+    assert.equal(activeRefreshTokens.size, 0);
+    assert.equal(tabA.getSnapshot().status, "unauthenticated");
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    // 4. Subsequent delayed refresh in peer tab cannot restore cookie after completed logout.
+    const postLogoutTok = await tabB.refreshSession({ force: true });
+    assert.equal(postLogoutTok, null);
+    assert.equal(cookieJarRefresh, null);
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    tabA.dispose();
+    tabB.dispose();
+  });
+
+  it("prevents delayed in-tab refresh from restoring state or cookie when logout waits cleanly (both with locks and locks=null fallback)", async () => {
+    for (const useLocks of [true, false]) {
+      const nowMs = 1_700_000_000_000;
+      const t1 = makeJwtWithExp(Math.floor((nowMs + 600_000) / 1000));
+      const t2 = makeJwtWithExp(Math.floor((nowMs + 900_000) / 1000));
+      const lockManager = useLocks ? createFakeLockManager() : null;
+      const refreshGate = createDeferred();
+      const logoutGate = createDeferred();
+      let cookieState = "R1";
+      let overlapCount = 0;
+      let activeOps = 0;
+      const events = [];
+
+      const manager = createAuthSessionManager({
+        now: () => nowMs,
+        locks: lockManager,
+        fetchImpl: async (url) => {
+          activeOps += 1;
+          if (activeOps > 1) {
+            overlapCount += 1;
+          }
+          try {
+            if (url === "/api/auth/login") {
+              cookieState = "R1";
+              return new Response(
+                JSON.stringify({
+                  authenticated: true,
+                  access_token: t1,
+                  expires_at_ms: nowMs + 600_000,
+                  user: SAMPLE_USER,
+                }),
+                { status: 200, headers: { "content-type": "application/json" } }
+              );
+            }
+            if (url === "/api/auth/refresh") {
+              events.push("refresh:enter");
+              await refreshGate.promise;
+              if (!cookieState) {
+                events.push("refresh:no_cookie");
+                return new Response(JSON.stringify({ authenticated: false }), { status: 200 });
+              }
+              cookieState = "R2";
+              events.push("refresh:exit");
+              return new Response(
+                JSON.stringify({
+                  authenticated: true,
+                  access_token: t2,
+                  expires_at_ms: nowMs + 900_000,
+                  user: SAMPLE_USER,
+                }),
+                { status: 200, headers: { "content-type": "application/json" } }
+              );
+            }
+            if (url === "/api/auth/logout") {
+              events.push("logout:enter");
+              await logoutGate.promise;
+              cookieState = null;
+              events.push("logout:exit");
+              return new Response(
+                JSON.stringify({
+                  local_cookie_cleared: true,
+                  backend_logout_request_completed: true,
+                  backend_revocation_state: "logout_request_accepted",
+                }),
+                { status: 200, headers: { "content-type": "application/json" } }
+              );
+            }
+            throw new Error(`Unexpected ${url}`);
+          } finally {
+            activeOps -= 1;
+          }
+        },
+      });
+
+      await manager.login("asha@example.com", "ValidPass123!");
+
+      // Refresh enters first and blocks on refreshGate; logout queues strictly behind it!
+      const refreshP = manager.refreshSession({ force: true });
+      await new Promise((r) => setTimeout(r, 5));
+      const logoutP = manager.logout();
+      await new Promise((r) => setTimeout(r, 5));
+
+      assert.deepEqual(events, ["refresh:enter"]);
+      assert.equal(cookieState, "R1");
+
+      refreshGate.resolve();
+      await new Promise((r) => setTimeout(r, 5));
+      // Refresh finished WITHOUT leaving authenticated state because logout was pending;
+      // now logout has entered the serialized mutex/lock and awaits logoutGate.
+      assert.deepEqual(events, ["refresh:enter", "refresh:exit", "logout:enter"]);
+
+      logoutGate.resolve();
+      const [refreshTok, logoutRes] = await Promise.all([refreshP, logoutP]);
+      assert.equal(refreshTok, null);
+      assert.equal(logoutRes.localCookieCleared, true);
+      assert.equal(cookieState, null);
+      assert.equal(manager.getSnapshot().status, "unauthenticated");
+      assert.equal(await manager.getAccessToken(), null);
+      assert.equal(overlapCount, 0);
+      assert.deepEqual(events, ["refresh:enter", "refresh:exit", "logout:enter", "logout:exit"]);
+      manager.dispose();
+    }
+  });
+
+  it("serializes logoutAll against concurrent refresh, releases lock for a single 401 refresh retry, and preserves session on failure", async () => {
+    const nowMs = 1_700_000_000_000;
+    const t1 = makeJwtWithExp(Math.floor((nowMs + 600_000) / 1000));
+    const t2 = makeJwtWithExp(Math.floor((nowMs + 900_000) / 1000));
+    const t3 = makeJwtWithExp(Math.floor((nowMs + 1_200_000) / 1000));
+    const lockManager = createFakeLockManager();
+    const bus = createMemoryBroadcastBus();
+
+    const refreshStarted = createDeferred();
+    const releaseConcurrentRefresh = createDeferred();
+    let refreshCallNum = 0;
+    let logoutAllCallNum = 0;
+    const timeline = [];
+
+    const sharedFetch = async (url, init) => {
+      if (url === "/api/auth/login") {
+        return new Response(
+          JSON.stringify({
+            authenticated: true,
+            access_token: t1,
+            expires_at_ms: nowMs + 600_000,
+            user: SAMPLE_USER,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url === "/api/auth/refresh") {
+        refreshCallNum += 1;
+        const n = refreshCallNum;
+        timeline.push(`refresh#${n}:start`);
+        if (n === 1) {
+          refreshStarted.resolve();
+          await releaseConcurrentRefresh.promise;
+        }
+        const nextTok = n === 1 ? t2 : t3;
+        timeline.push(`refresh#${n}:end`);
+        return new Response(
+          JSON.stringify({
+            authenticated: true,
+            access_token: nextTok,
+            expires_at_ms: nowMs + 1_200_000,
+            user: SAMPLE_USER,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url === "/api/auth/logout-all") {
+        logoutAllCallNum += 1;
+        const n = logoutAllCallNum;
+        timeline.push(`logoutAll#${n}:start:${init.headers.Authorization}`);
+        if (n === 1) {
+          timeline.push("logoutAll#1:401");
+          return new Response(
+            JSON.stringify({
+              code: "UNAUTHORIZED",
+              local_cookie_cleared: false,
+              backend_logout_request_completed: false,
+              backend_revocation_state: "backend_rejected",
+            }),
+            { status: 401, headers: { "content-type": "application/json" } }
+          );
+        }
+        timeline.push("logoutAll#2:200");
+        return new Response(
+          JSON.stringify({
+            local_cookie_cleared: true,
+            backend_logout_request_completed: true,
+            backend_revocation_state: "all_refresh_tokens_revoked",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      throw new Error(`Unexpected ${url}`);
+    };
+
+    const tabA = createAuthSessionManager({
+      now: () => nowMs,
+      locks: lockManager,
+      broadcastChannelFactory: bus.factory,
+      fetchImpl: sharedFetch,
+    });
+    const tabB = createAuthSessionManager({
+      now: () => nowMs,
+      locks: lockManager,
+      broadcastChannelFactory: bus.factory,
+      fetchImpl: sharedFetch,
+    });
+
+    await tabA.login("asha@example.com", "ValidPass123!");
+
+    // Concurrent refresh in Tab B acquires lock first; Tab A calls logoutAll concurrently.
+    const refreshP = tabB.refreshSession({ force: true });
+    await refreshStarted.promise;
+    const logoutAllP = tabA.logoutAll();
+    await new Promise((r) => setTimeout(r, 5));
+
+    // logoutAll must not enter until Tab B's refresh releases the shared lock.
+    assert.deepEqual(timeline, ["refresh#1:start"]);
+
+    releaseConcurrentRefresh.resolve();
+    const [rTok, allRes] = await Promise.all([refreshP, logoutAllP]);
+    assert.equal(rTok, t2);
+    assert.equal(allRes.ok, true);
+    assert.equal(allRes.backendRevocationState, "all_refresh_tokens_revoked");
+    // Exact serialized timeline: refresh#1 -> logoutAll#1(t2)->401 -> refresh#2(t3) -> logoutAll#2(t3)->200
+    assert.deepEqual(timeline, [
+      "refresh#1:start",
+      "refresh#1:end",
+      `logoutAll#1:start:Bearer ${t2}`,
+      "logoutAll#1:401",
+      "refresh#2:start",
+      "refresh#2:end",
+      `logoutAll#2:start:Bearer ${t3}`,
+      "logoutAll#2:200",
+    ]);
+    assert.equal(tabA.getSnapshot().status, "unauthenticated");
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    // Verify logoutAll stops after a single 401 retry (never loops infinitely on persistent 401)
+    let endlessAttempts = 0;
+    const finiteManager = createAuthSessionManager({
+      now: () => nowMs,
+      locks: null,
+      fetchImpl: async (url) => {
+        if (url === "/api/auth/login") {
+          return new Response(
+            JSON.stringify({
+              authenticated: true,
+              access_token: t1,
+              expires_at_ms: nowMs + 600_000,
+              user: SAMPLE_USER,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        if (url === "/api/auth/refresh") {
+          return new Response(
+            JSON.stringify({
+              authenticated: true,
+              access_token: t2,
+              expires_at_ms: nowMs + 900_000,
+              user: SAMPLE_USER,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        endlessAttempts += 1;
+        return new Response(
+          JSON.stringify({
+            code: "UNAUTHORIZED",
+            local_cookie_cleared: false,
+            backend_logout_request_completed: false,
+            backend_revocation_state: "backend_rejected",
+          }),
+          { status: 401, headers: { "content-type": "application/json" } }
+        );
+      },
+    });
+    await finiteManager.login("asha@example.com", "ValidPass123!");
+    const persistent401 = await finiteManager.logoutAll();
+    assert.equal(persistent401.ok, false);
+    assert.equal(endlessAttempts, 2);
+    assert.equal(finiteManager.getSnapshot().status, "authenticated");
+
+    tabA.dispose();
+    tabB.dispose();
+    finiteManager.dispose();
+  });
+
+  it("ensures a delayed refresh queued behind active logout cannot restore cookie or re-authenticate peers", async () => {
+    const nowMs = 1_700_000_000_000;
+    const t1 = makeJwtWithExp(Math.floor((nowMs + 600_000) / 1000));
+    const t2 = makeJwtWithExp(Math.floor((nowMs + 900_000) / 1000));
+    const bus = createMemoryBroadcastBus();
+    const lockManager = createFakeLockManager();
+    const logoutStarted = createDeferred();
+    const releaseLogout = createDeferred();
+
+    let cookieJarRefresh = "R1";
+    let refreshRequestsAfterLogout = 0;
+
+    const sharedFetch = async (url) => {
+      if (url === "/api/auth/login") {
+        cookieJarRefresh = "R1";
+        return new Response(
+          JSON.stringify({
+            authenticated: true,
+            access_token: t1,
+            expires_at_ms: nowMs + 600_000,
+            user: SAMPLE_USER,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url === "/api/auth/logout") {
+        logoutStarted.resolve();
+        await releaseLogout.promise;
+        cookieJarRefresh = null;
+        return new Response(
+          JSON.stringify({
+            local_cookie_cleared: true,
+            backend_logout_request_completed: true,
+            backend_revocation_state: "logout_request_accepted",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (url === "/api/auth/refresh") {
+        refreshRequestsAfterLogout += 1;
+        if (!cookieJarRefresh) {
+          return new Response(JSON.stringify({ authenticated: false }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        cookieJarRefresh = "R2";
+        return new Response(
+          JSON.stringify({
+            authenticated: true,
+            access_token: t2,
+            expires_at_ms: nowMs + 900_000,
+            user: SAMPLE_USER,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      throw new Error(`Unexpected ${url}`);
+    };
+
+    const tabA = createAuthSessionManager({
+      now: () => nowMs,
+      locks: lockManager,
+      broadcastChannelFactory: bus.factory,
+      fetchImpl: sharedFetch,
+    });
+    const tabB = createAuthSessionManager({
+      now: () => nowMs,
+      locks: lockManager,
+      broadcastChannelFactory: bus.factory,
+      fetchImpl: sharedFetch,
+    });
+
+    await tabA.login("asha@example.com", "ValidPass123!");
+    assert.equal(tabB.getSnapshot().status, "authenticated");
+
+    // 1. Tab A begins logout (holds lock while /api/auth/logout is in flight)
+    const logoutP = tabA.logout();
+    await logoutStarted.promise;
+
+    // 2. Tab B tries a delayed/concurrent forced refresh while Tab A holds lock
+    const delayedRefreshP = tabB.refreshSession({ force: true });
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(refreshRequestsAfterLogout, 0);
+
+    // 3. Logout finishes -> clears cookie -> broadcasts final LOGOUT -> releases lock
+    releaseLogout.resolve();
+    const [logoutRes, delayedTok] = await Promise.all([logoutP, delayedRefreshP]);
+
+    assert.equal(logoutRes.localCookieCleared, true);
+    assert.equal(delayedTok, null);
+    assert.equal(cookieJarRefresh, null);
+    assert.equal(tabA.getSnapshot().status, "unauthenticated");
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    tabA.dispose();
+    tabB.dispose();
   });
 });

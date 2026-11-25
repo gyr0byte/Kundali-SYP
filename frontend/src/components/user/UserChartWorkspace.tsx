@@ -29,8 +29,7 @@ import {
   applyUpdatedProfile,
   classifyWorkspaceAuthError,
   createInitialWorkspaceState,
-  fetchWorkspaceProfilesSafely,
-  reconcileWorkspaceSessionTransition,
+  createProfileLoadCoordinator,
   resolveActiveProfile,
   resolveVisibleProfiles,
   type ProfileWorkspaceState,
@@ -291,11 +290,9 @@ export function UserChartWorkspace({
   const [mobilePane, setMobilePane] = useState<"chart" | "secondary">("chart");
   const [highlightedFactId, setHighlightedFactId] = useState<string | null>(null);
 
-  const inFlightLoadRef = useRef<{
-    ownerKey: string;
-    promise: Promise<BirthProfile[] | null>;
-  } | null>(null);
-  const loadedOwnerKeyRef = useRef<string | null>(null);
+  const [profileLoadCoordinator] = useState(createProfileLoadCoordinator);
+  const explicitProviderSeqRef = useRef<number>(1);
+  const prevExplicitTokenProviderRef = useRef<AccessTokenProvider | undefined>(getAccessToken);
 
   const t = messagesByLocale[locale];
   const isAuthenticated = authStatus === "authenticated";
@@ -308,6 +305,20 @@ export function UserChartWorkspace({
   const unknownTimeMode = isUnknownTimeProfile(activeProfile);
   const sensitivityFact = getSensitivityFact(chart);
 
+  const getLiveContextForCoordinator = useCallback((): {
+    status: AuthSessionStatus;
+    ownerKey: string | null;
+  } | null => {
+    if (hasExplicitTokenProp || !session) {
+      return null;
+    }
+    const snap = session.getSnapshot();
+    return {
+      status: snap.status,
+      ownerKey: snap.status === "authenticated" ? (snap.user?.id ?? "session-user") : null,
+    };
+  }, [hasExplicitTokenProp, session]);
+
   const handleAuthFailure = useCallback((): "unavailable" | "unauthenticated" => {
     if (!hasExplicitTokenProp && session) {
       const live = session.getSnapshot();
@@ -317,89 +328,70 @@ export function UserChartWorkspace({
         return "unavailable";
       }
     }
+    profileLoadCoordinator.invalidate();
     if (hasExplicitTokenProp || !session) {
       setLocalAuthStatus("unauthenticated");
     }
-    loadedOwnerKeyRef.current = null;
     setProfileState((prev) => applySessionCleared(prev));
     setConfirmDeleteId(null);
     setFormMode("closed");
     return "unauthenticated";
-  }, [hasExplicitTokenProp, session]);
+  }, [hasExplicitTokenProp, profileLoadCoordinator, session]);
 
   const executeProfileListFetch = useCallback(
     (ownerKey: string): Promise<BirthProfile[] | null> => {
-      if (inFlightLoadRef.current?.ownerKey === ownerKey) {
-        return inFlightLoadRef.current.promise;
-      }
-
-      let promise: Promise<BirthProfile[] | null> | null = null;
-      promise = (async (): Promise<BirthProfile[] | null> => {
-        await Promise.resolve();
-        setIsLoadingProfiles(true);
-        setApiErrorBanner(null);
-
-        try {
-          const result = await fetchWorkspaceProfilesSafely({
-            getAccessToken: effectiveGetAccessToken,
-            unavailableFallbackMessage: t.sessionUnavailableBannerBody,
-            liveSessionStatus: () =>
-              !hasExplicitTokenProp && session ? session.getSnapshot().status : null,
-            fetchList: async (validToken) => {
-              if (hasExplicitTokenProp || !session) {
-                setLocalAuthStatus("authenticated");
-              }
-              const response = await listProfiles({
-                getAccessToken: () => validToken,
-                onUnauthorizedRefresh: effectiveOnUnauthorizedRefresh,
-                baseUrl: apiBaseUrl,
-              });
-              return response.items;
-            },
+      return profileLoadCoordinator.startLoad({
+        ownerKey,
+        getAccessToken: effectiveGetAccessToken,
+        unavailableFallbackMessage: t.sessionUnavailableBannerBody,
+        getLiveContext: getLiveContextForCoordinator,
+        fetchList: async (validToken) => {
+          if (hasExplicitTokenProp || !session) {
+            setLocalAuthStatus("authenticated");
+          }
+          const response = await listProfiles({
+            getAccessToken: () => validToken,
+            onUnauthorizedRefresh: effectiveOnUnauthorizedRefresh,
+            baseUrl: apiBaseUrl,
           });
-
-          if (result.kind === "loaded") {
-            loadedOwnerKeyRef.current = ownerKey;
-            setProfileState((prev) => applyLoadedProfiles(prev, result.items));
-            return result.items;
+          return response.items;
+        },
+        onLoadingChange: (isLoading) => {
+          setIsLoadingProfiles(isLoading);
+          if (isLoading) {
+            setApiErrorBanner(null);
           }
-
-          if (result.kind === "unauthenticated") {
-            handleAuthFailure();
-            setApiErrorBanner(result.message);
-            return null;
-          }
-
-          if (result.kind === "unavailable") {
-            if (hasExplicitTokenProp || !session) {
-              setLocalAuthStatus((prev) => (prev === "checking" ? "unavailable" : prev));
-            }
-            setApiErrorBanner(result.message);
-            return null;
-          }
-
+        },
+        onLoaded: (items) => {
+          setProfileState((prev) => applyLoadedProfiles(prev, items));
+          setApiErrorBanner(null);
+        },
+        onUnauthenticated: (message) => {
+          handleAuthFailure();
+          setApiErrorBanner(message);
+        },
+        onUnavailable: (message) => {
           if (hasExplicitTokenProp || !session) {
             setLocalAuthStatus((prev) => (prev === "checking" ? "unavailable" : prev));
           }
-          setApiErrorBanner(result.message);
-          return null;
-        } finally {
-          if (inFlightLoadRef.current?.promise === promise) {
-            inFlightLoadRef.current = null;
+          setApiErrorBanner(message);
+        },
+        onError: (message) => {
+          if (hasExplicitTokenProp || !session) {
+            setLocalAuthStatus((prev) => (prev === "checking" ? "unavailable" : prev));
           }
-          setIsLoadingProfiles(false);
-        }
-      })();
-
-      inFlightLoadRef.current = { ownerKey, promise };
-      return promise;
+          setApiErrorBanner(message);
+        },
+      });
     },
     [
       apiBaseUrl,
       effectiveGetAccessToken,
       effectiveOnUnauthorizedRefresh,
+      getLiveContextForCoordinator,
       handleAuthFailure,
       hasExplicitTokenProp,
+      profileLoadCoordinator,
       session,
       t.sessionUnavailableBannerBody,
     ]
@@ -407,7 +399,9 @@ export function UserChartWorkspace({
 
   const loadSavedProfilesFromApi = useCallback(async () => {
     const ownerKey =
-      !hasExplicitTokenProp && session?.user?.id ? session.user.id : "prop-session";
+      !hasExplicitTokenProp && session
+        ? (session.user?.id ?? "session-user")
+        : `prop-session-${explicitProviderSeqRef.current}`;
     await executeProfileListFetch(ownerKey);
   }, [executeProfileListFetch, hasExplicitTokenProp, session]);
 
@@ -415,8 +409,16 @@ export function UserChartWorkspace({
     let active = true;
 
     if (hasExplicitTokenProp) {
-      loadedOwnerKeyRef.current = null;
-      void executeProfileListFetch("prop-session");
+      if (prevExplicitTokenProviderRef.current !== getAccessToken) {
+        prevExplicitTokenProviderRef.current = getAccessToken;
+        explicitProviderSeqRef.current += 1;
+      }
+      const propOwnerKey = `prop-session-${explicitProviderSeqRef.current}`;
+      profileLoadCoordinator.syncSessionContext({
+        status: "checking",
+        ownerKey: propOwnerKey,
+      });
+      void executeProfileListFetch(propOwnerKey);
       return () => {
         active = false;
       };
@@ -428,14 +430,14 @@ export function UserChartWorkspace({
       };
     }
 
-    const action = reconcileWorkspaceSessionTransition({
-      sessionStatus: session.status,
-      userId: session.user?.id ?? null,
-      loadedOwnerKey: loadedOwnerKeyRef.current,
+    const sessionOwnerKey =
+      session.status === "authenticated" ? (session.user?.id ?? "session-user") : null;
+    const transition = profileLoadCoordinator.syncSessionContext({
+      status: session.status,
+      ownerKey: sessionOwnerKey,
     });
 
-    if (action === "clear") {
-      loadedOwnerKeyRef.current = null;
+    if (transition.shouldClearWorkspace) {
       void Promise.resolve().then(() => {
         if (!active) return;
         setProfileState((prev) =>
@@ -445,15 +447,26 @@ export function UserChartWorkspace({
         setProfileActionNotice(null);
         setFormServerErrors([]);
         setFormMode("closed");
+        if (session.status === "unauthenticated") {
+          setIsLoadingProfiles(false);
+        }
       });
-    } else if (action === "fetch") {
-      void executeProfileListFetch(session.user?.id ?? "session-user");
+    }
+
+    if (transition.shouldFetch && sessionOwnerKey) {
+      void executeProfileListFetch(sessionOwnerKey);
     }
 
     return () => {
       active = false;
     };
-  }, [executeProfileListFetch, hasExplicitTokenProp, session]);
+  }, [
+    executeProfileListFetch,
+    getAccessToken,
+    hasExplicitTokenProp,
+    profileLoadCoordinator,
+    session,
+  ]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -508,13 +521,22 @@ export function UserChartWorkspace({
       return;
     }
     if (effectiveGetAccessToken) {
+      const propOwnerKey = `prop-session-${explicitProviderSeqRef.current}`;
+      profileLoadCoordinator.syncSessionContext({
+        status: "checking",
+        ownerKey: propOwnerKey,
+      });
       setLocalAuthStatus("checking");
-      await executeProfileListFetch("prop-session");
+      await executeProfileListFetch(propOwnerKey);
     }
   }
 
   async function handleSubmitProfileForm(payload: BirthProfileCreatePayload) {
     if (!isAuthenticated) return;
+    const snap = profileLoadCoordinator.getSnapshot();
+    const requestGeneration = snap.generation;
+    const requestOwnerKey = snap.ownerKey ?? "";
+
     setIsSubmittingForm(true);
     setFormServerErrors([]);
     setApiErrorBanner(null);
@@ -529,10 +551,28 @@ export function UserChartWorkspace({
     try {
       if (formMode === "edit" && activeProfile && !activeProfile.is_synthetic_sample) {
         const updated = await updateProfile(clientConfig, activeProfile.id, payload);
+        if (
+          !profileLoadCoordinator.isCurrentRequest({
+            requestGeneration,
+            ownerKey: requestOwnerKey,
+            getLiveContext: getLiveContextForCoordinator,
+          })
+        ) {
+          return;
+        }
         setProfileState((prev) => applyUpdatedProfile(prev, updated));
         setProfileActionNotice(t.profileUpdatedNotice);
       } else {
         const created = await createProfile(clientConfig, payload);
+        if (
+          !profileLoadCoordinator.isCurrentRequest({
+            requestGeneration,
+            ownerKey: requestOwnerKey,
+            getLiveContext: getLiveContextForCoordinator,
+          })
+        ) {
+          return;
+        }
         setProfileState((prev) => applyCreatedProfile(prev, created));
         setProfileActionNotice(t.profileCreatedNotice);
       }
@@ -540,6 +580,9 @@ export function UserChartWorkspace({
       setSettingsNotice(null);
       setHighlightedFactId(null);
     } catch (err) {
+      if (profileLoadCoordinator.getSnapshot().generation !== requestGeneration) {
+        return;
+      }
       if (err instanceof ApiClientError) {
         const authClass = classifyWorkspaceAuthError({
           errorCode: err.code,
@@ -566,6 +609,10 @@ export function UserChartWorkspace({
 
   async function handleConfirmDeleteProfile(profileId: string) {
     if (!isAuthenticated || profileId === SAMPLE_NORTH_LONDON_PROFILE.id) return;
+    const snap = profileLoadCoordinator.getSnapshot();
+    const requestGeneration = snap.generation;
+    const requestOwnerKey = snap.ownerKey ?? "";
+
     setIsDeletingProfile(true);
     setApiErrorBanner(null);
     setProfileActionNotice(null);
@@ -579,11 +626,23 @@ export function UserChartWorkspace({
         },
         profileId
       );
+      if (
+        !profileLoadCoordinator.isCurrentRequest({
+          requestGeneration,
+          ownerKey: requestOwnerKey,
+          getLiveContext: getLiveContextForCoordinator,
+        })
+      ) {
+        return;
+      }
       setProfileState((prev) => applyDeletedProfile(prev, profileId));
       setConfirmDeleteId(null);
       setProfileActionNotice(t.profileDeletedNotice);
       setHighlightedFactId(null);
     } catch (err) {
+      if (profileLoadCoordinator.getSnapshot().generation !== requestGeneration) {
+        return;
+      }
       if (err instanceof ApiClientError) {
         const authClass = classifyWorkspaceAuthError({
           errorCode: err.code,
