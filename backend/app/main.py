@@ -3,12 +3,16 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request, status
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 
 from app.api.v1.admin import router as admin_router
 from app.api.v1.astrologer import router as astrologer_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.profiles import router as profiles_router
 from app.core.config import Settings, get_settings
 from app.core.security import validate_fernet_key
 
@@ -54,7 +58,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_v1.include_router(auth_router)
     api_v1.include_router(admin_router)
     api_v1.include_router(astrologer_router)
+    api_v1.include_router(profiles_router)
     app.include_router(api_v1)
+
+    @app.exception_handler(RequestValidationError)
+    async def profile_sanitized_validation_handler(
+        request: Request, exc: RequestValidationError
+    ) -> Response:
+        """Strip submitted inputs/context from 422 errors on birth-profile routes."""
+        if request.url.path.startswith("/api/v1/profiles"):
+            sanitized_detail = [
+                {
+                    "type": str(err.get("type", "validation_error")),
+                    "loc": list(err.get("loc", ())),
+                    "msg": str(err.get("msg", "Invalid input")),
+                }
+                for err in exc.errors()
+            ]
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                content={"detail": sanitized_detail},
+            )
+        return await request_validation_exception_handler(request, exc)
 
     @app.get("/health", tags=["system"])
     def health_check() -> dict[str, str]:

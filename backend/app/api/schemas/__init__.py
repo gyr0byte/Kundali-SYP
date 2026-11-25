@@ -11,6 +11,12 @@ from app.api.schemas.auth import (
     ResetPasswordRequest,
     TokenResponse,
 )
+from app.api.schemas.profile import (
+    BirthProfileCreate,
+    BirthProfileListResponse,
+    BirthProfileResponse,
+    BirthProfileUpdate,
+)
 from app.api.schemas.user import (
     AstrologerApplyRequest,
     AstrologerListResponse,
@@ -25,6 +31,10 @@ __all__ = [
     "AstrologerProfileResponse",
     "AuditLogListResponse",
     "AuditLogResponse",
+    "BirthProfileCreate",
+    "BirthProfileListResponse",
+    "BirthProfileResponse",
+    "BirthProfileUpdate",
     "ChangePasswordRequest",
     "ErrorResponse",
     "ForgotPasswordRequest",
