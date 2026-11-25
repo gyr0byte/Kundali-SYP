@@ -82,8 +82,13 @@ export interface ChartFacts {
   facts: ChartFact[];
 }
 
+export type BsConversionStatus = "resolved" | "awaiting_bs_conversion";
+
+export type AccessTokenProvider = () => string | null | Promise<string | null>;
+
 export interface BirthProfile {
   id: string;
+  owner_id?: string;
   label: string;
   /** Original calendar in which the birth date was entered; persisted separately from display preference. */
   input_calendar: CalendarType;
@@ -91,6 +96,8 @@ export interface BirthProfile {
   entered_date: string;
   /** Resolved Gregorian AD date (null when entered in BS while bikram_sambat.py is unimplemented). */
   date_ad: string | null;
+  /** Explicit backend conversion status for Bikram Sambat birth dates. */
+  bs_conversion_status?: BsConversionStatus;
   /** Local birth time (HH:MM or HH:MM:SS); strictly null when time_certainty === "unknown". */
   time_local: string | null;
   place_name: string;
@@ -98,7 +105,30 @@ export interface BirthProfile {
   longitude: number;
   timezone: string;
   time_certainty: TimeCertainty;
+  created_at?: string;
+  updated_at?: string;
   is_synthetic_sample?: boolean;
+}
+
+export interface BirthProfileCreatePayload {
+  label: string;
+  input_calendar: CalendarType;
+  entered_date: string;
+  time_certainty: TimeCertainty;
+  time_local: string | null;
+  place_name: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+}
+
+export type BirthProfileUpdatePayload = Partial<BirthProfileCreatePayload>;
+
+export interface BirthProfileListResponse {
+  items: BirthProfile[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export type ChartCalculationState =

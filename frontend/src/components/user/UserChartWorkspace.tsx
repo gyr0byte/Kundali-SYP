@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import { ApiClientError } from "@/lib/api/client";
+import {
+  createProfile,
+  deleteProfile,
+  listProfiles,
+  updateProfile,
+} from "@/lib/api/profiles";
 import {
   classifySettingsChange,
   formatDegreeInSign,
@@ -12,11 +19,24 @@ import {
 } from "@/lib/kundali/chart-helpers";
 import { NAKSHATRA_NE, PLANET_LABELS, ZODIAC_SIGNS } from "@/lib/kundali/constants";
 import {
+  activateSyntheticSamplePreview,
+  applyCreatedProfile,
+  applyDeletedProfile,
+  applyLoadedProfiles,
+  applyUpdatedProfile,
+  createInitialWorkspaceState,
+  resolveActiveProfile,
+  resolveVisibleProfiles,
+  type ProfileWorkspaceState,
+} from "@/lib/kundali/profile-workflow";
+import {
   SAMPLE_NORTH_LONDON_CHART_FACTS,
   SAMPLE_NORTH_LONDON_PROFILE,
 } from "@/lib/kundali/sample-north-london";
 import type {
+  AccessTokenProvider,
   BirthProfile,
+  BirthProfileCreatePayload,
   ChartCalculationState,
   ChartFacts,
   ChartSettings,
@@ -47,6 +67,7 @@ export interface WorkspaceMessages {
   newProfileButton: string;
   loadSampleButton: string;
   restoreSampleButton: string;
+  syntheticPreviewButton: string;
   enteredInPrefix: string;
   displayCalendarLabel: string;
   displayAd: string;
@@ -72,6 +93,21 @@ export interface WorkspaceMessages {
   discard: string;
   applyAndRecompute: string;
   close: string;
+  authRequiredBannerTitle: string;
+  authRequiredBannerBody: string;
+  authFormLockedNotice: string;
+  loadingProfilesNotice: string;
+  retryLoadButton: string;
+  editProfileButton: string;
+  deleteProfileButton: string;
+  deleteConfirmPrompt: string;
+  deleteConfirmButton: string;
+  deleteCancelButton: string;
+  profileCreatedNotice: string;
+  profileUpdatedNotice: string;
+  profileDeletedNotice: string;
+  savedProfileChartPendingTitle: string;
+  savedProfileBsStatusBadge: string;
   sampleBannerTitle: string;
   sampleBannerBody: string;
   approxBannerTitle: string;
@@ -123,6 +159,7 @@ export interface WorkspaceMessages {
   transitsContractBody: string;
   unavailableNoChart: string;
   formTitle: string;
+  editFormTitle: string;
   formSubtitle: string;
   formLabel: string;
   formLabelPlaceholder: string;
@@ -132,10 +169,18 @@ export interface WorkspaceMessages {
   formTime: string;
   formTimeUnknownNote: string;
   formPlace: string;
+  formPlacePlaceholder: string;
   formTimezone: string;
+  formTimezonePlaceholder: string;
   formLatitude: string;
   formLongitude: string;
+  formLatitudePlaceholder: string;
+  formLongitudePlaceholder: string;
+  formCoordinatesNote: string;
   formSubmit: string;
+  editFormSubmit: string;
+  formSaving: string;
+  formDeleting: string;
   formCancel: string;
   mobileViewChart: string;
   mobileViewSecondary: string;
@@ -143,6 +188,10 @@ export interface WorkspaceMessages {
 
 interface UserChartWorkspaceProps {
   messagesByLocale: Record<Locale, WorkspaceMessages>;
+  /** Optional injected access token provider; omitted until frontend auth milestone lands. */
+  getAccessToken?: AccessTokenProvider;
+  /** Optional API base URL override for environment wiring or tests. */
+  apiBaseUrl?: string;
 }
 
 const DEFAULT_SETTINGS: ChartSettings = {
@@ -189,11 +238,27 @@ function computeProfileState(
   return { state: "unavailable", chart: null };
 }
 
-export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps) {
+export function UserChartWorkspace({
+  messagesByLocale,
+  getAccessToken,
+  apiBaseUrl,
+}: UserChartWorkspaceProps) {
   const [locale, setLocale] = useState<Locale>("en");
-  const [profiles, setProfiles] = useState<BirthProfile[]>([]);
-  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
-  const [showCreateForm, setShowCreateForm] = useState<boolean>(false);
+  const [profileState, setProfileState] = useState<ProfileWorkspaceState>(
+    createInitialWorkspaceState
+  );
+  const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "unauthenticated">(
+    () => (getAccessToken ? "checking" : "unauthenticated")
+  );
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState<boolean>(false);
+  const [formMode, setFormMode] = useState<"closed" | "create" | "edit">("closed");
+  const [isSubmittingForm, setIsSubmittingForm] = useState<boolean>(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [isDeletingProfile, setIsDeletingProfile] = useState<boolean>(false);
+  const [apiErrorBanner, setApiErrorBanner] = useState<string | null>(null);
+  const [formServerErrors, setFormServerErrors] = useState<readonly string[]>([]);
+  const [profileActionNotice, setProfileActionNotice] = useState<string | null>(null);
+
   const [displayCalendar, setDisplayCalendar] = useState<DisplayCalendarPreference>("AD");
   const [appliedSettings, setAppliedSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
   const [stagedSettings, setStagedSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
@@ -205,17 +270,94 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
   const [highlightedFactId, setHighlightedFactId] = useState<string | null>(null);
 
   const t = messagesByLocale[locale];
-  const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? null;
+  const isAuthenticated = authStatus === "authenticated";
+  const visibleProfiles = resolveVisibleProfiles(profileState);
+  const activeProfile = resolveActiveProfile(profileState);
   const { state: calcState, chart } = computeProfileState(activeProfile, appliedSettings);
   const provenanceStatus = getProvenanceStatus(chart, calcState);
   const unknownTimeMode = isUnknownTimeProfile(activeProfile);
   const sensitivityFact = getSensitivityFact(chart);
+
+  const loadSavedProfilesFromApi = useCallback(async () => {
+    const token = getAccessToken ? await getAccessToken() : null;
+    const validToken = typeof token === "string" ? token.trim() : "";
+    if (!validToken) {
+      setAuthStatus("unauthenticated");
+      setIsLoadingProfiles(false);
+      setApiErrorBanner(null);
+      return;
+    }
+
+    setAuthStatus("authenticated");
+    setIsLoadingProfiles(true);
+    setApiErrorBanner(null);
+    try {
+      const response = await listProfiles({ getAccessToken, baseUrl: apiBaseUrl });
+      setProfileState((prev) => applyLoadedProfiles(prev, response.items));
+    } catch (err) {
+      if (
+        err instanceof ApiClientError &&
+        (err.code === "AUTH_REQUIRED" || err.code === "UNAUTHORIZED")
+      ) {
+        setAuthStatus("unauthenticated");
+        setApiErrorBanner(err.message);
+      } else {
+        setApiErrorBanner(
+          err instanceof Error ? err.message : "Unable to load saved birth profiles."
+        );
+      }
+    } finally {
+      setIsLoadingProfiles(false);
+    }
+  }, [apiBaseUrl, getAccessToken]);
+
+  useEffect(() => {
+    let active = true;
+    async function hydrate() {
+      const token = getAccessToken ? await getAccessToken() : null;
+      if (!active) return;
+      const validToken = typeof token === "string" ? token.trim() : "";
+      if (!validToken) {
+        setAuthStatus("unauthenticated");
+        setIsLoadingProfiles(false);
+        return;
+      }
+      setAuthStatus("authenticated");
+      setIsLoadingProfiles(true);
+      try {
+        const response = await listProfiles({ getAccessToken, baseUrl: apiBaseUrl });
+        if (!active) return;
+        setProfileState((prev) => applyLoadedProfiles(prev, response.items));
+        setApiErrorBanner(null);
+      } catch (err) {
+        if (!active) return;
+        if (
+          err instanceof ApiClientError &&
+          (err.code === "AUTH_REQUIRED" || err.code === "UNAUTHORIZED")
+        ) {
+          setAuthStatus("unauthenticated");
+          setApiErrorBanner(err.message);
+        } else {
+          setApiErrorBanner(
+            err instanceof Error ? err.message : "Unable to load saved birth profiles."
+          );
+        }
+      } finally {
+        if (active) setIsLoadingProfiles(false);
+      }
+    }
+    void hydrate();
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl, getAccessToken]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         setSettingsOpen(false);
         setHighlightedFactId(null);
+        setConfirmDeleteId(null);
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -223,25 +365,99 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
   }, []);
 
   function handleLoadSample() {
-    setProfiles((prev) =>
-      prev.some((p) => p.id === SAMPLE_NORTH_LONDON_PROFILE.id)
-        ? prev
-        : [SAMPLE_NORTH_LONDON_PROFILE, ...prev]
-    );
-    setActiveProfileId(SAMPLE_NORTH_LONDON_PROFILE.id);
+    setProfileState((prev) => activateSyntheticSamplePreview(prev));
     setAppliedSettings(DEFAULT_SETTINGS);
     setStagedSettings(DEFAULT_SETTINGS);
     setSettingsNotice(null);
-    setShowCreateForm(false);
+    setProfileActionNotice(null);
+    setApiErrorBanner(null);
+    setFormServerErrors([]);
+    setConfirmDeleteId(null);
+    setFormMode("closed");
     setHighlightedFactId(null);
   }
 
-  function handleSaveProfile(profile: BirthProfile) {
-    setProfiles((prev) => [...prev, profile]);
-    setActiveProfileId(profile.id);
-    setShowCreateForm(false);
-    setSettingsNotice(null);
-    setHighlightedFactId(null);
+  function handleOpenCreateForm() {
+    if (!isAuthenticated) return;
+    setFormServerErrors([]);
+    setApiErrorBanner(null);
+    setProfileActionNotice(null);
+    setConfirmDeleteId(null);
+    setFormMode("create");
+  }
+
+  function handleOpenEditForm() {
+    if (!isAuthenticated || !activeProfile || activeProfile.is_synthetic_sample) return;
+    setFormServerErrors([]);
+    setApiErrorBanner(null);
+    setProfileActionNotice(null);
+    setConfirmDeleteId(null);
+    setFormMode("edit");
+  }
+
+  async function handleSubmitProfileForm(payload: BirthProfileCreatePayload) {
+    if (!isAuthenticated) return;
+    setIsSubmittingForm(true);
+    setFormServerErrors([]);
+    setApiErrorBanner(null);
+    setProfileActionNotice(null);
+
+    try {
+      if (formMode === "edit" && activeProfile && !activeProfile.is_synthetic_sample) {
+        const updated = await updateProfile(
+          { getAccessToken, baseUrl: apiBaseUrl },
+          activeProfile.id,
+          payload
+        );
+        setProfileState((prev) => applyUpdatedProfile(prev, updated));
+        setProfileActionNotice(t.profileUpdatedNotice);
+      } else {
+        const created = await createProfile({ getAccessToken, baseUrl: apiBaseUrl }, payload);
+        setProfileState((prev) => applyCreatedProfile(prev, created));
+        setProfileActionNotice(t.profileCreatedNotice);
+      }
+      setFormMode("closed");
+      setSettingsNotice(null);
+      setHighlightedFactId(null);
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        if (err.code === "AUTH_REQUIRED" || err.code === "UNAUTHORIZED") {
+          setAuthStatus("unauthenticated");
+        }
+        setFormServerErrors(
+          err.validationMessages.length > 0 ? err.validationMessages : [err.message]
+        );
+      } else {
+        setFormServerErrors(["Unable to save birth profile."]);
+      }
+    } finally {
+      setIsSubmittingForm(false);
+    }
+  }
+
+  async function handleConfirmDeleteProfile(profileId: string) {
+    if (!isAuthenticated || profileId === SAMPLE_NORTH_LONDON_PROFILE.id) return;
+    setIsDeletingProfile(true);
+    setApiErrorBanner(null);
+    setProfileActionNotice(null);
+
+    try {
+      await deleteProfile({ getAccessToken, baseUrl: apiBaseUrl }, profileId);
+      setProfileState((prev) => applyDeletedProfile(prev, profileId));
+      setConfirmDeleteId(null);
+      setProfileActionNotice(t.profileDeletedNotice);
+      setHighlightedFactId(null);
+    } catch (err) {
+      if (err instanceof ApiClientError && err.code === "UNAUTHORIZED") {
+        setAuthStatus("unauthenticated");
+      }
+      setApiErrorBanner(
+        err instanceof Error ? err.message : "Unable to delete saved birth profile."
+      );
+      setConfirmDeleteId(null);
+    } finally {
+      setIsDeletingProfile(false);
+    }
   }
 
   function handleApplySettings() {
@@ -261,7 +477,7 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
   const selectedFact =
     highlightedFactId === "f_lagna"
       ? lagna
-      : placements.find((p) => p.id === highlightedFactId) ?? null;
+      : (placements.find((p) => p.id === highlightedFactId) ?? null);
 
   const provenanceLabel =
     provenanceStatus === "swieph"
@@ -284,6 +500,14 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
         ? t.awaitingRecomputeBody
         : t.awaitingApiBody;
 
+  const showForm = formMode !== "closed" || !activeProfile;
+  const effectiveFormMode: "create" | "edit" =
+    formMode === "edit" && activeProfile && !activeProfile.is_synthetic_sample ? "edit" : "create";
+  const editingTarget = effectiveFormMode === "edit" ? activeProfile : null;
+  const showSavedPendingBanner = Boolean(
+    activeProfile && !activeProfile.is_synthetic_sample && calcState === "unavailable"
+  );
+
   return (
     <div className="flex min-h-screen flex-col bg-[var(--kundali-cream)] text-[var(--kundali-ink)]">
       {/* Top Shell Header */}
@@ -300,8 +524,9 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
               </span>
               <button
                 type="button"
-                onClick={() => setShowCreateForm(true)}
-                className="text-[#BCCCDC] hover:text-white"
+                disabled={!isAuthenticated}
+                onClick={handleOpenCreateForm}
+                className="text-[#BCCCDC] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t.navProfiles}
               </button>
@@ -356,22 +581,25 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
       <div className="border-b border-[var(--kundali-border)] bg-[var(--kundali-strip)] px-4 py-2.5 sm:px-6">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-2.5">
-            {profiles.length > 0 ? (
+            {visibleProfiles.length > 0 ? (
               <div className="flex flex-wrap items-center gap-2">
                 <label htmlFor="active-profile-select" className="sr-only">
                   {t.profileLabel}
                 </label>
                 <select
                   id="active-profile-select"
-                  value={activeProfileId ?? ""}
+                  value={profileState.activeProfileId ?? ""}
                   onChange={(e) => {
-                    setActiveProfileId(e.target.value);
-                    setShowCreateForm(false);
+                    const nextId = e.target.value;
+                    setProfileState((prev) => ({ ...prev, activeProfileId: nextId }));
+                    setFormMode("closed");
+                    setConfirmDeleteId(null);
+                    setFormServerErrors([]);
                     setHighlightedFactId(null);
                   }}
                   className="rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2.5 py-1.5 text-xs font-semibold text-[var(--kundali-navy)]"
                 >
-                  {profiles.map((p) => (
+                  {visibleProfiles.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.label}
                     </option>
@@ -402,6 +630,12 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
                           ? t.timeApproximate
                           : t.timeUnknown}
                     </span>
+                    {!activeProfile.is_synthetic_sample &&
+                    activeProfile.bs_conversion_status === "awaiting_bs_conversion" ? (
+                      <span className="rounded border border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] px-2 py-0.5 font-medium text-[var(--kundali-amber)]">
+                        {t.savedProfileBsStatusBadge}
+                      </span>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -411,11 +645,43 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
 
             <button
               type="button"
-              onClick={() => setShowCreateForm(true)}
-              className="rounded border border-[var(--kundali-navy)] bg-[var(--kundali-surface)] px-2.5 py-1 text-xs font-semibold text-[var(--kundali-navy)] hover:bg-[var(--kundali-cream)]"
+              disabled={!isAuthenticated}
+              onClick={handleOpenCreateForm}
+              className="rounded border border-[var(--kundali-navy)] bg-[var(--kundali-surface)] px-2.5 py-1 text-xs font-semibold text-[var(--kundali-navy)] hover:bg-[var(--kundali-cream)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               + {t.newProfileButton}
             </button>
+
+            {activeProfile && !activeProfile.is_synthetic_sample ? (
+              <>
+                <button
+                  type="button"
+                  disabled={!isAuthenticated || isDeletingProfile}
+                  onClick={handleOpenEditForm}
+                  className="rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2.5 py-1 text-xs font-semibold text-[var(--kundali-ink)] hover:bg-[var(--kundali-cream)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t.editProfileButton}
+                </button>
+                <button
+                  type="button"
+                  disabled={!isAuthenticated || isDeletingProfile}
+                  onClick={() => setConfirmDeleteId(activeProfile.id)}
+                  className="rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-crimson-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--kundali-crimson)] hover:bg-[var(--kundali-crimson-bg)]/80 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t.deleteProfileButton}
+                </button>
+              </>
+            ) : null}
+
+            {!activeProfile?.is_synthetic_sample ? (
+              <button
+                type="button"
+                onClick={handleLoadSample}
+                className="rounded border border-[var(--kundali-emerald-border)] bg-[var(--kundali-emerald-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--kundali-emerald)] hover:bg-[var(--kundali-emerald-bg)]/80"
+              >
+                {t.syntheticPreviewButton}
+              </button>
+            ) : null}
           </div>
 
           <div className="relative flex flex-wrap items-center gap-2">
@@ -451,8 +717,8 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
             </div>
 
             <span className="hidden rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2 py-1 font-mono text-[11px] text-[var(--kundali-muted)] md:inline-block">
-              {appliedSettings.ayanamsha} · {appliedSettings.node_type} · {appliedSettings.house_system} ·{" "}
-              {appliedSettings.year_days}d
+              {appliedSettings.ayanamsha} · {appliedSettings.node_type} ·{" "}
+              {appliedSettings.house_system} · {appliedSettings.year_days}d
             </span>
 
             <button
@@ -500,6 +766,83 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
 
       {/* Main Content */}
       <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-5 sm:px-6">
+        {authStatus === "unauthenticated" ? (
+          <div
+            role="status"
+            className="mb-4 rounded border border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] px-4 py-3 text-xs"
+          >
+            <p className="font-semibold text-[var(--kundali-amber)]">
+              {t.authRequiredBannerTitle}
+            </p>
+            <p className="mt-1 leading-relaxed text-[var(--kundali-ink)]">
+              {t.authRequiredBannerBody}
+            </p>
+          </div>
+        ) : null}
+
+        {isLoadingProfiles ? (
+          <div className="mb-4 rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-4 py-2.5 text-xs font-medium text-[var(--kundali-muted)]">
+            {t.loadingProfilesNotice}
+          </div>
+        ) : null}
+
+        {apiErrorBanner ? (
+          <div
+            role="alert"
+            className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-crimson-bg)] px-4 py-2.5 text-xs font-medium text-[var(--kundali-crimson)]"
+          >
+            <span>{apiErrorBanner}</span>
+            {isAuthenticated ? (
+              <button
+                type="button"
+                onClick={() => void loadSavedProfilesFromApi()}
+                className="rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-surface)] px-2.5 py-1 text-[11px] font-semibold text-[var(--kundali-crimson)]"
+              >
+                {t.retryLoadButton}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {profileActionNotice ? (
+          <div
+            role="status"
+            className="mb-4 rounded border border-[var(--kundali-emerald-border)] bg-[var(--kundali-emerald-bg)] px-4 py-2.5 text-xs font-medium text-[var(--kundali-emerald)]"
+          >
+            {profileActionNotice}
+          </div>
+        ) : null}
+
+        {confirmDeleteId && activeProfile && confirmDeleteId === activeProfile.id ? (
+          <div
+            role="alertdialog"
+            aria-label={t.deleteProfileButton}
+            className="mb-4 rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-crimson-bg)] px-4 py-3 text-xs"
+          >
+            <p className="font-semibold text-[var(--kundali-crimson)]">
+              {activeProfile.label} — {t.deleteConfirmPrompt}
+            </p>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={isDeletingProfile}
+                onClick={() => void handleConfirmDeleteProfile(activeProfile.id)}
+                className="rounded bg-[var(--kundali-crimson)] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isDeletingProfile ? t.formDeleting : t.deleteConfirmButton}
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingProfile}
+                onClick={() => setConfirmDeleteId(null)}
+                className="rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--kundali-ink)]"
+              >
+                {t.deleteCancelButton}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {displayCalendar !== "AD" ? (
           <div className="mb-4 rounded border border-[var(--kundali-slate-border)] bg-[var(--kundali-slate-bg)]/45 px-3.5 py-2 text-xs text-[var(--kundali-ink)]">
             {t.bsDisplayPending}
@@ -512,15 +855,26 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
           </div>
         ) : null}
 
-        {showCreateForm || !activeProfile ? (
+        {showForm ? (
           <BirthProfileForm
-            canCancel={profiles.length > 0}
-            onSaveProfile={handleSaveProfile}
+            key={editingTarget ? `edit-${editingTarget.id}` : "create-profile"}
+            mode={effectiveFormMode}
+            initialProfile={editingTarget}
+            canCancel={Boolean(activeProfile)}
+            isAuthenticated={isAuthenticated}
+            isSubmitting={isSubmittingForm}
+            serverErrors={formServerErrors}
+            onSubmitProfile={handleSubmitProfileForm}
             onLoadSyntheticSample={handleLoadSample}
-            onCancel={() => setShowCreateForm(false)}
+            onCancel={() => {
+              setFormMode("closed");
+              setFormServerErrors([]);
+            }}
             labels={{
               formTitle: t.formTitle,
+              editFormTitle: t.editFormTitle,
               formSubtitle: t.formSubtitle,
+              authFormLockedNotice: t.authFormLockedNotice,
               formLabel: t.formLabel,
               formLabelPlaceholder: t.formLabelPlaceholder,
               formInputCalendar: t.formInputCalendar,
@@ -529,10 +883,17 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
               formTime: t.formTime,
               formTimeUnknownNote: t.formTimeUnknownNote,
               formPlace: t.formPlace,
+              formPlacePlaceholder: t.formPlacePlaceholder,
               formTimezone: t.formTimezone,
+              formTimezonePlaceholder: t.formTimezonePlaceholder,
               formLatitude: t.formLatitude,
               formLongitude: t.formLongitude,
+              formLatitudePlaceholder: t.formLatitudePlaceholder,
+              formLongitudePlaceholder: t.formLongitudePlaceholder,
+              formCoordinatesNote: t.formCoordinatesNote,
               formSubmit: t.formSubmit,
+              editFormSubmit: t.editFormSubmit,
+              formSaving: t.formSaving,
               formCancel: t.formCancel,
               loadSampleButton: t.loadSampleButton,
               timeExact: t.timeExact,
@@ -543,7 +904,11 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
         ) : (
           <>
             {/* Mobile view switcher (<768px) */}
-            <div className="mb-4 grid grid-cols-2 gap-2 md:hidden" role="group" aria-label="Workspace view">
+            <div
+              className="mb-4 grid grid-cols-2 gap-2 md:hidden"
+              role="group"
+              aria-label="Workspace view"
+            >
               <button
                 type="button"
                 aria-pressed={mobilePane === "chart"}
@@ -577,7 +942,7 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
                   mobilePane === "secondary" ? "hidden md:block" : "block"
                 }`}
               >
-                {activeProfile.is_synthetic_sample ? (
+                {activeProfile?.is_synthetic_sample ? (
                   <div className="rounded border border-[var(--kundali-emerald-border)] bg-[var(--kundali-emerald-bg)] px-4 py-3 text-xs">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="font-semibold text-[var(--kundali-emerald)]">
@@ -603,7 +968,18 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
                   </div>
                 ) : null}
 
-                {activeProfile.time_certainty === "approximate" ? (
+                {showSavedPendingBanner ? (
+                  <div className="rounded border border-[var(--kundali-slate-border)] bg-[var(--kundali-surface)] px-4 py-3 text-xs">
+                    <p className="font-semibold text-[var(--kundali-navy)]">
+                      {t.savedProfileChartPendingTitle}
+                    </p>
+                    <p className="mt-1 leading-relaxed text-[var(--kundali-muted)]">
+                      {t.awaitingApiBody}
+                    </p>
+                  </div>
+                ) : null}
+
+                {activeProfile?.time_certainty === "approximate" ? (
                   <div className="rounded border border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] px-4 py-3 text-xs">
                     <p className="font-semibold text-[var(--kundali-amber)]">
                       {t.approxBannerTitle}
@@ -674,7 +1050,7 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
                           southLabel: t.southLabel,
                           unknownTimeNoticeTitle: t.unknownTimeBannerTitle,
                           unknownTimeNoticeBody: t.unknownTimeBannerBody,
-                          unavailableTitle: activeProfile.label,
+                          unavailableTitle: activeProfile?.label ?? "",
                           houseWord: t.houseWord,
                           lagnaShort: t.lagnaShort,
                         }}
@@ -697,7 +1073,8 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
                                 } ${formatDegreeInSign(selectedFact.degree)}`
                               : `${
                                   locale === "ne"
-                                    ? PLANET_LABELS[selectedFact.planet]?.ne ?? selectedFact.planet
+                                    ? (PLANET_LABELS[selectedFact.planet]?.ne ??
+                                      selectedFact.planet)
                                     : selectedFact.planet
                                 } — ${
                                   locale === "ne"
@@ -707,7 +1084,8 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
                                   selectedFact.house
                                 }, ${
                                   locale === "ne"
-                                    ? NAKSHATRA_NE[selectedFact.nakshatra] ?? selectedFact.nakshatra
+                                    ? (NAKSHATRA_NE[selectedFact.nakshatra] ??
+                                      selectedFact.nakshatra)
                                     : selectedFact.nakshatra
                                 } ${selectedFact.pada})`}
                           </span>

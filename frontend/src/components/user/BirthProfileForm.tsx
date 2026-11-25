@@ -2,16 +2,32 @@
 
 import React, { useState } from "react";
 import { COMMON_TIMEZONES } from "@/lib/kundali/constants";
-import type { BirthProfile, CalendarType, TimeCertainty } from "@/lib/kundali/types";
+import {
+  getInitialProfileFormValues,
+  validateProfileFormInput,
+} from "@/lib/kundali/profile-workflow";
+import type {
+  BirthProfile,
+  BirthProfileCreatePayload,
+  CalendarType,
+  TimeCertainty,
+} from "@/lib/kundali/types";
 
 interface BirthProfileFormProps {
+  mode: "create" | "edit";
+  initialProfile?: BirthProfile | null;
   canCancel: boolean;
-  onSaveProfile: (profile: BirthProfile) => void;
+  isAuthenticated: boolean;
+  isSubmitting?: boolean;
+  serverErrors?: readonly string[];
+  onSubmitProfile: (payload: BirthProfileCreatePayload) => Promise<void> | void;
   onLoadSyntheticSample: () => void;
   onCancel?: () => void;
   labels: {
     formTitle: string;
+    editFormTitle: string;
     formSubtitle: string;
+    authFormLockedNotice: string;
     formLabel: string;
     formLabelPlaceholder: string;
     formInputCalendar: string;
@@ -20,10 +36,17 @@ interface BirthProfileFormProps {
     formTime: string;
     formTimeUnknownNote: string;
     formPlace: string;
+    formPlacePlaceholder: string;
     formTimezone: string;
+    formTimezonePlaceholder: string;
     formLatitude: string;
     formLongitude: string;
+    formLatitudePlaceholder: string;
+    formLongitudePlaceholder: string;
+    formCoordinatesNote: string;
     formSubmit: string;
+    editFormSubmit: string;
+    formSaving: string;
     formCancel: string;
     loadSampleButton: string;
     timeExact: string;
@@ -33,66 +56,69 @@ interface BirthProfileFormProps {
 }
 
 export function BirthProfileForm({
+  mode,
+  initialProfile,
   canCancel,
-  onSaveProfile,
+  isAuthenticated,
+  isSubmitting = false,
+  serverErrors = [],
+  onSubmitProfile,
   onLoadSyntheticSample,
   onCancel,
   labels,
 }: BirthProfileFormProps) {
-  const [label, setLabel] = useState("");
-  const [inputCalendar, setInputCalendar] = useState<CalendarType>("BS");
-  const [enteredDate, setEnteredDate] = useState("2055-04-15");
-  const [certainty, setCertainty] = useState<TimeCertainty>("exact");
-  const [timeLocal, setTimeLocal] = useState("08:30");
-  const [placeName, setPlaceName] = useState("Kathmandu, Nepal");
-  const [timezone, setTimezone] = useState("Asia/Kathmandu");
-  const [latitude, setLatitude] = useState("27.7172");
-  const [longitude, setLongitude] = useState("85.3240");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const initialValues = getInitialProfileFormValues(mode === "edit" ? initialProfile : null);
 
-  function handleSubmit(event: React.FormEvent) {
+  const [label, setLabel] = useState(initialValues.label);
+  const [inputCalendar, setInputCalendar] = useState<CalendarType>(initialValues.inputCalendar);
+  const [enteredDate, setEnteredDate] = useState(initialValues.enteredDate);
+  const [certainty, setCertainty] = useState<TimeCertainty>(initialValues.certainty);
+  const [timeLocal, setTimeLocal] = useState(initialValues.timeLocal);
+  const [placeName, setPlaceName] = useState(initialValues.placeName);
+  const [timezone, setTimezone] = useState(initialValues.timezone);
+  const [latitude, setLatitude] = useState(initialValues.latitude);
+  const [longitude, setLongitude] = useState(initialValues.longitude);
+  const [clientError, setClientError] = useState<string | null>(null);
+
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const trimmedLabel = label.trim();
-    if (!trimmedLabel) {
-      setErrorMsg("Enter a profile label.");
-      return;
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(enteredDate.trim())) {
-      setErrorMsg("Enter birth date in YYYY-MM-DD format.");
-      return;
-    }
-    const lat = Number(latitude);
-    const lon = Number(longitude);
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
-      setErrorMsg("Latitude must be between -90 and 90.");
-      return;
-    }
-    if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
-      setErrorMsg("Longitude must be between -180 and 180.");
-      return;
-    }
-    if (certainty !== "unknown" && !/^\d{2}:\d{2}(:\d{2})?$/.test(timeLocal.trim())) {
-      setErrorMsg("Enter local birth time (HH:MM) or mark time certainty as Unknown.");
+    if (!isAuthenticated || isSubmitting) {
       return;
     }
 
-    setErrorMsg(null);
-    const profile: BirthProfile = {
-      id: `profile_${Date.now()}`,
-      label: trimmedLabel,
-      input_calendar: inputCalendar,
-      entered_date: enteredDate.trim(),
-      date_ad: inputCalendar === "AD" ? enteredDate.trim() : null,
-      time_local: certainty === "unknown" ? null : timeLocal.trim(),
-      place_name: placeName.trim() || "Unspecified place",
-      latitude: lat,
-      longitude: lon,
+    const validation = validateProfileFormInput({
+      label,
+      inputCalendar,
+      enteredDate,
+      certainty,
+      timeLocal,
+      placeName,
       timezone,
-      time_certainty: certainty,
-      is_synthetic_sample: false,
-    };
-    onSaveProfile(profile);
+      latitude,
+      longitude,
+    });
+
+    if (validation.error || !validation.payload) {
+      setClientError(validation.error);
+      return;
+    }
+
+    setClientError(null);
+    await onSubmitProfile(validation.payload);
   }
+
+  const displayedErrors = clientError
+    ? [clientError]
+    : serverErrors.length > 0
+      ? serverErrors
+      : [];
+
+  const titleText = mode === "edit" ? labels.editFormTitle : labels.formTitle;
+  const submitText = isSubmitting
+    ? labels.formSaving
+    : mode === "edit"
+      ? labels.editFormSubmit
+      : labels.formSubmit;
 
   return (
     <section
@@ -102,7 +128,7 @@ export function BirthProfileForm({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--kundali-border-subtle)] pb-4">
         <div>
           <h2 id="create-profile-heading" className="text-lg font-bold text-[var(--kundali-navy)]">
-            {labels.formTitle}
+            {titleText}
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-[var(--kundali-muted)]">
             {labels.formSubtitle}
@@ -117,13 +143,30 @@ export function BirthProfileForm({
         </button>
       </div>
 
+      {!isAuthenticated ? (
+        <div
+          role="status"
+          className="mt-4 rounded border border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] px-3.5 py-2.5 text-xs font-medium text-[var(--kundali-amber)]"
+        >
+          {labels.authFormLockedNotice}
+        </div>
+      ) : null}
+
       <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs" noValidate>
-        {errorMsg ? (
+        {displayedErrors.length > 0 ? (
           <div
             role="alert"
             className="rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-crimson-bg)] px-3 py-2 font-medium text-[var(--kundali-crimson)]"
           >
-            {errorMsg}
+            {displayedErrors.length === 1 ? (
+              <p>{displayedErrors[0]}</p>
+            ) : (
+              <ul className="list-disc space-y-1 pl-4">
+                {displayedErrors.map((err) => (
+                  <li key={err}>{err}</li>
+                ))}
+              </ul>
+            )}
           </div>
         ) : null}
 
@@ -147,16 +190,17 @@ export function BirthProfileForm({
             <span className="block font-semibold text-[var(--kundali-ink)]">
               {labels.formInputCalendar}
             </span>
-            <div className="mt-1 grid grid-cols-2 gap-2" role="group" aria-label={labels.formInputCalendar}>
+            <div
+              className="mt-1 grid grid-cols-2 gap-2"
+              role="group"
+              aria-label={labels.formInputCalendar}
+            >
               {(["BS", "AD"] as const).map((cal) => (
                 <button
                   key={cal}
                   type="button"
                   aria-pressed={inputCalendar === cal}
-                  onClick={() => {
-                    setInputCalendar(cal);
-                    setEnteredDate(cal === "BS" ? "2055-04-15" : "1998-07-31");
-                  }}
+                  onClick={() => setInputCalendar(cal)}
                   className={`rounded border px-3 py-2 font-semibold ${
                     inputCalendar === cal
                       ? "border-[var(--kundali-navy)] bg-[var(--kundali-navy)] text-[var(--kundali-cream)]"
@@ -177,6 +221,7 @@ export function BirthProfileForm({
               id="bp-date"
               type="text"
               inputMode="numeric"
+              required
               value={enteredDate}
               onChange={(e) => setEnteredDate(e.target.value)}
               placeholder="YYYY-MM-DD"
@@ -185,13 +230,22 @@ export function BirthProfileForm({
           </div>
 
           <div>
-            <label htmlFor="bp-certainty" className="block font-semibold text-[var(--kundali-ink)]">
+            <label
+              htmlFor="bp-certainty"
+              className="block font-semibold text-[var(--kundali-ink)]"
+            >
               {labels.formCertainty}
             </label>
             <select
               id="bp-certainty"
               value={certainty}
-              onChange={(e) => setCertainty(e.target.value as TimeCertainty)}
+              onChange={(e) => {
+                const next = e.target.value as TimeCertainty;
+                setCertainty(next);
+                if (next === "unknown") {
+                  setTimeLocal("");
+                }
+              }}
               className="mt-1 w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-3 py-2 text-sm text-[var(--kundali-ink)]"
             >
               <option value="exact">{labels.timeExact}</option>
@@ -226,8 +280,10 @@ export function BirthProfileForm({
             <input
               id="bp-place"
               type="text"
+              required
               value={placeName}
               onChange={(e) => setPlaceName(e.target.value)}
+              placeholder={labels.formPlacePlaceholder}
               className="mt-1 w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-3 py-2 text-sm text-[var(--kundali-ink)]"
             />
           </div>
@@ -236,18 +292,21 @@ export function BirthProfileForm({
             <label htmlFor="bp-tz" className="block font-semibold text-[var(--kundali-ink)]">
               {labels.formTimezone}
             </label>
-            <select
+            <input
               id="bp-tz"
+              type="text"
+              list="bp-iana-tz-list"
+              required
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
+              placeholder={labels.formTimezonePlaceholder}
               className="mt-1 w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-3 py-2 font-mono text-xs text-[var(--kundali-ink)]"
-            >
+            />
+            <datalist id="bp-iana-tz-list">
               {COMMON_TIMEZONES.map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz}
-                </option>
+                <option key={tz} value={tz} />
               ))}
-            </select>
+            </datalist>
           </div>
 
           <div>
@@ -257,9 +316,13 @@ export function BirthProfileForm({
             <input
               id="bp-lat"
               type="number"
-              step="0.0001"
+              step="any"
+              min={-90}
+              max={90}
+              required
               value={latitude}
               onChange={(e) => setLatitude(e.target.value)}
+              placeholder={labels.formLatitudePlaceholder}
               className="mt-1 w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-3 py-2 font-mono text-sm text-[var(--kundali-ink)]"
             />
           </div>
@@ -271,29 +334,39 @@ export function BirthProfileForm({
             <input
               id="bp-lon"
               type="number"
-              step="0.0001"
+              step="any"
+              min={-180}
+              max={180}
+              required
               value={longitude}
               onChange={(e) => setLongitude(e.target.value)}
+              placeholder={labels.formLongitudePlaceholder}
               className="mt-1 w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-3 py-2 font-mono text-sm text-[var(--kundali-ink)]"
             />
           </div>
+
+          <p className="sm:col-span-2 text-[11px] leading-relaxed text-[var(--kundali-muted)]">
+            {labels.formCoordinatesNote}
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--kundali-border-subtle)] pt-4">
           {canCancel && onCancel ? (
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={onCancel}
-              className="rounded border border-[var(--kundali-border)] px-4 py-2 font-medium text-[var(--kundali-ink)] hover:bg-[var(--kundali-strip)]"
+              className="rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-4 py-2 text-xs font-semibold text-[var(--kundali-ink)] hover:bg-[var(--kundali-strip)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {labels.formCancel}
             </button>
           ) : null}
           <button
             type="submit"
-            className="rounded bg-[var(--kundali-navy)] px-4 py-2 font-semibold text-[var(--kundali-cream)] hover:bg-[var(--kundali-navy-hover)]"
+            disabled={!isAuthenticated || isSubmitting}
+            className="rounded bg-[var(--kundali-navy)] px-4 py-2 text-xs font-semibold text-[var(--kundali-cream)] hover:bg-[var(--kundali-navy-hover)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {labels.formSubmit}
+            {submitText}
           </button>
         </div>
       </form>
