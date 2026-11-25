@@ -626,8 +626,8 @@ export function UserChartWorkspace({ messagesByLocale }: UserChartWorkspaceProps
                   </div>
                 ) : null}
 
-                {/* Adaptive Chart + Table Grid: stacks when primary-pane width is narrow */}
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(300px,360px)_minmax(0,1fr)]">
+                {/* Adaptive Chart + Table Grid: stacks unless primary pane has >= 860px width */}
+                <div className="@container grid grid-cols-1 gap-4 @[860px]:grid-cols-[minmax(300px,340px)_minmax(0,1fr)]">
                   <section
                     aria-label={t.chartSectionTitle}
                     className="rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] p-4"

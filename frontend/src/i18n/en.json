@@ -85,7 +85,7 @@
     "chatAllowlistTitle": "Allowlisted Payload Preview (derived facts + conventions only)",
     "chatExcludedTitle": "Excluded from LLM Payload",
     "chatExcludedList": "ChartMetadata (datetime_utc_iso, julian_day, utc_offset_hours), birth_profiles raw dates/times, latitude, longitude, timezone, and user identity.",
-    "chatComposerPlaceholder": "AI chat awaits backend app/ai/* & /charts/{id}/chat implementation…",
+    "chatComposerPlaceholder": "AI chat awaits backend app/ai/* & /charts/{id}/chat…",
     "chatSubmitDisabled": "Ask (Unavailable)",
     "dashaContractTitle": "Vimshottari Dasha Hierarchy (MD → AD → PD)",
     "dashaContractBody": "Three-level drill-down (Mahadasha → Antardasha → Pratyantardasha) awaiting backend app/calc/dasha.py implementation. No period dates are fabricated.",
