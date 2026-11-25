@@ -42,3 +42,14 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# === Impeccable local/runtime state (keep config.json, surfaces/, design.json, live/config.json tracked) ===
+**/.impeccable/config.local.json
+**/.impeccable/live/sessions/
+**/.impeccable/live/roots.json
+**/.impeccable/live/inject-journal.json
+
+# === Local Agent Skill Installations ===
+.agent/
+.agents/skills/design-taste-frontend/
+skills-lock.json
