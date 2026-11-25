@@ -1,26 +1,65 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f6f1;
+  --foreground: #18222d;
+  --kundali-navy: #13293d;
+  --kundali-navy-hover: #1d3b56;
+  --kundali-cream: #f7f6f1;
+  --kundali-surface: #ffffff;
+  --kundali-strip: #efece3;
+  --kundali-ink: #18222d;
+  --kundali-muted: #4b5966;
+  --kundali-border: #d8d5cc;
+  --kundali-border-subtle: #e6e3da;
+  --kundali-emerald: #1b6b4a;
+  --kundali-emerald-bg: #e6f4ee;
+  --kundali-emerald-border: #a7d7c2;
+  --kundali-amber: #b85d0a;
+  --kundali-amber-bg: #fef3e2;
+  --kundali-amber-border: #f3c68f;
+  --kundali-crimson: #b42318;
+  --kundali-crimson-bg: #fef2f2;
+  --kundali-crimson-border: #fca5a5;
+  --kundali-slate-bg: #e2e8f0;
+  --kundali-slate-border: #cbd5e1;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-instrument-sans), "Noto Sans Devanagari", "Nirmala UI", "Kohinoor Devanagari", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+::selection {
+  background: #13293d;
+  color: #f7f6f1;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+}
+
+.tabular-data {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--kundali-amber);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
