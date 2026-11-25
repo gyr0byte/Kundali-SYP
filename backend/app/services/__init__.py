@@ -6,7 +6,7 @@ from app.services.astrologer_service import (
     list_astrologers,
     suspend_astrologer,
 )
-from app.services.audit_service import log_action
+from app.services.audit_service import log_action, log_profile_action, sanitize_profile_metadata
 from app.services.auth_service import (
     authenticate_user,
     change_password,
@@ -30,6 +30,7 @@ __all__ = [
     "list_astrologers",
     "list_users",
     "log_action",
+    "log_profile_action",
     "reactivate_user",
     "refresh_tokens",
     "register_user",
@@ -37,5 +38,6 @@ __all__ = [
     "reset_password",
     "revoke_all_tokens",
     "revoke_token",
+    "sanitize_profile_metadata",
     "suspend_astrologer",
 ]

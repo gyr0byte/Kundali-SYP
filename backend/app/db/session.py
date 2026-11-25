@@ -6,7 +6,7 @@
 from collections.abc import Generator
 from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -15,6 +15,13 @@ from app.core.config import get_settings
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
+
+
+def _enable_sqlite_foreign_keys(dbapi_connection: Any, _connection_record: Any) -> None:
+    """Enforce SQLite foreign key constraints (including ON DELETE CASCADE)."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 def get_engine() -> Engine:
@@ -27,6 +34,7 @@ def get_engine() -> Engine:
         if url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
             _engine = create_engine(url, connect_args=connect_args, poolclass=StaticPool)
+            event.listen(_engine, "connect", _enable_sqlite_foreign_keys)
         else:
             # Production PostgreSQL must require SSL
             _engine = create_engine(url, pool_pre_ping=True)

@@ -14,6 +14,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.db.models.astrologer_profile import AstrologerProfile
     from app.db.models.password_reset_token import PasswordResetToken
+    from app.db.models.profile import BirthProfile
     from app.db.models.refresh_token import RefreshToken
 
 
@@ -70,4 +71,10 @@ class User(Base):
         "PasswordResetToken",
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    birth_profiles: Mapped[list["BirthProfile"]] = relationship(
+        "BirthProfile",
+        back_populates="owner",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
