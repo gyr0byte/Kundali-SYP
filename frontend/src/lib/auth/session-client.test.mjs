@@ -506,17 +506,71 @@ describe("Single-flight proactive/401 refresh and cross-tab coordination", () =>
 
     // Logout in Tab A propagates LOGOUT to Tab B immediately
     const logoutChannel = bus.factory(AUTH_BROADCAST_CHANNEL);
-    // First test that malformed/expired/refresh-token broadcasts are ignored when logged out
     await tabA.logout();
     assert.equal(tabA.getSnapshot().status, "unauthenticated");
     assert.equal(tabB.getSnapshot().status, "unauthenticated");
-
+    // Rejects invalid broadcast shapes, bad JWTs, missing/past/inflated expiry, missing user metadata, or nested refresh tokens
     logoutChannel.postMessage({
       type: "SESSION_UPDATED",
       senderId: "evil-or-stale",
       user: SAMPLE_USER,
-      accessToken: "spoofed",
+      accessToken: freshToken,
       expiresAtMs: nowMs - 1000, // expired
+    });
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    logoutChannel.postMessage({
+      type: "SESSION_UPDATED",
+      senderId: "null-expiry",
+      user: SAMPLE_USER,
+      accessToken: freshToken,
+      expiresAtMs: null,
+    });
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    logoutChannel.postMessage({
+      type: "SESSION_UPDATED",
+      senderId: "nan-expiry",
+      user: SAMPLE_USER,
+      accessToken: freshToken,
+      expiresAtMs: Number.NaN,
+    });
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    logoutChannel.postMessage({
+      type: "SESSION_UPDATED",
+      senderId: "bad-jwt-shape",
+      user: SAMPLE_USER,
+      accessToken: "not-three-segments",
+      expiresAtMs: nowMs + 60_000,
+    });
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    const noExpJwt = `${Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url")}.${Buffer.from(JSON.stringify({ sub: "user-123" })).toString("base64url")}.sig`;
+    logoutChannel.postMessage({
+      type: "SESSION_UPDATED",
+      senderId: "missing-jwt-exp",
+      user: SAMPLE_USER,
+      accessToken: noExpJwt,
+      expiresAtMs: nowMs + 60_000,
+    });
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    logoutChannel.postMessage({
+      type: "SESSION_UPDATED",
+      senderId: "inflated-expiry",
+      user: SAMPLE_USER,
+      accessToken: freshToken,
+      expiresAtMs: nowMs + 60_000_000,
+    });
+    assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    logoutChannel.postMessage({
+      type: "SESSION_UPDATED",
+      senderId: "incomplete-user",
+      user: { id: "u1", email: "a@example.com" },
+      accessToken: freshToken,
+      expiresAtMs: nowMs + 600_000,
     });
     assert.equal(tabB.getSnapshot().status, "unauthenticated");
 
@@ -524,15 +578,77 @@ describe("Single-flight proactive/401 refresh and cross-tab coordination", () =>
       type: "SESSION_UPDATED",
       senderId: "smuggling-tab",
       user: SAMPLE_USER,
-      accessToken: "ok-tok",
+      accessToken: freshToken,
       expiresAtMs: nowMs + 60_000,
-      refresh_token: "must-never-be-accepted",
+      nested: { refreshToken: "must-never-be-accepted" },
     });
     assert.equal(tabB.getSnapshot().status, "unauthenticated");
+
+    // Valid broadcast with valid JWT + future exp + complete user IS accepted cleanly
+    const validBroadcaster = bus.factory(AUTH_BROADCAST_CHANNEL);
+    validBroadcaster.postMessage({
+      type: "SESSION_UPDATED",
+      senderId: "other-valid-tab",
+      user: SAMPLE_USER,
+      accessToken: freshToken,
+      expiresAtMs: nowMs + 600_000,
+    });
+    assert.equal(tabB.getSnapshot().status, "authenticated");
+    assert.equal(await tabB.getAccessToken(), freshToken);
+    validBroadcaster.close();
 
     logoutChannel.close();
     tabA.dispose();
     tabB.dispose();
+  });
+
+  it("preserves Retry-After headers on 429 rate-limited login and register responses without inventing delays when absent", async () => {
+    const nowMs = 1_700_000_000_000;
+    const manager = createAuthSessionManager({
+      locks: null,
+      now: () => nowMs,
+      fetchImpl: async (url) => {
+        if (url === "/api/auth/login") {
+          return new Response(
+            JSON.stringify({
+              code: "RATE_LIMITED",
+              message: "Too many attempts",
+            }),
+            {
+              status: 429,
+              headers: {
+                "content-type": "application/json",
+                "retry-after": "45",
+              },
+            }
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            code: "RATE_LIMITED",
+            message: "Slow down",
+          }),
+          {
+            status: 429,
+            headers: { "content-type": "application/json" },
+          }
+        );
+      },
+    });
+
+    const loginLimited = await manager.login("asha@example.com", "WrongPass123!");
+    assert.equal(loginLimited.ok, false);
+    assert.equal(loginLimited.status, 429);
+    assert.equal(loginLimited.retryAfter, "45");
+    assert.equal(loginLimited.retryAfterSeconds, 45);
+
+    const registerLimitedNoHeader = await manager.register("asha@example.com", "ValidPass123!");
+    assert.equal(registerLimitedNoHeader.ok, false);
+    assert.equal(registerLimitedNoHeader.status, 429);
+    assert.equal(registerLimitedNoHeader.retryAfter, null);
+    assert.equal(registerLimitedNoHeader.retryAfterSeconds, null);
+
+    manager.dispose();
   });
 });
 
@@ -956,12 +1072,13 @@ describe("Logout vs refresh lock serialization and race protection", () => {
           await releaseConcurrentRefresh.promise;
         }
         const nextTok = n === 1 ? t2 : t3;
+        const nextExpMs = n === 1 ? nowMs + 900_000 : nowMs + 1_200_000;
         timeline.push(`refresh#${n}:end`);
         return new Response(
           JSON.stringify({
             authenticated: true,
             access_token: nextTok,
-            expires_at_ms: nowMs + 1_200_000,
+            expires_at_ms: nextExpMs,
             user: SAMPLE_USER,
           }),
           { status: 200, headers: { "content-type": "application/json" } }

@@ -14,6 +14,7 @@ $env:TMP="D:\DevCache\tmp"
 $env:HF_HOME="D:\DevCache\huggingface"
 $env:TORCH_HOME="D:\DevCache\torch"
 $env:XDG_CACHE_HOME="D:\DevCache\xdg"
+$env:PLAYWRIGHT_BROWSERS_PATH="D:\DevCache\ms-playwright"
 $env:NEXT_TELEMETRY_DISABLED="1"
 
 Write-Host "Kundali env loaded - all caches on D:\DevCache" -ForegroundColor Green

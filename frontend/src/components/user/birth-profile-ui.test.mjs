@@ -9,8 +9,22 @@ import ts from "typescript";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC_ROOT = path.resolve(__dirname, "../..");
 
+const NEXT_LINK_STUB_URL = pathToFileURL(path.join(SRC_ROOT, "__virtual_next_link_stub__.mjs")).href;
+
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "server-only") {
+      return {
+        url: "data:text/javascript,export default {};",
+        shortCircuit: true,
+      };
+    }
+    if (specifier === "next/link") {
+      return {
+        url: NEXT_LINK_STUB_URL,
+        shortCircuit: true,
+      };
+    }
     if (specifier.startsWith("@/")) {
       const mapped = path.join(SRC_ROOT, specifier.slice(2));
       for (const ext of ["", ".ts", ".tsx", ".json"]) {
@@ -39,6 +53,14 @@ registerHooks({
     return nextResolve(specifier, context);
   },
   load(url, context, nextLoad) {
+    if (url === NEXT_LINK_STUB_URL) {
+      return {
+        format: "module",
+        shortCircuit: true,
+        source:
+          "import React from 'react'; export default function Link({href, children, ...rest}){ return React.createElement('a', {href: typeof href === 'string' ? href : String(href), ...rest}, children); }",
+      };
+    }
     if (url.startsWith("file:") && (url.endsWith(".tsx") || url.endsWith(".ts"))) {
       const source = readFileSync(fileURLToPath(url), "utf8");
       const transpiled = ts.transpileModule(source, {
@@ -122,6 +144,8 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
     );
 
     assert.match(html, /Authentication Required to Manage Saved Profiles/);
+    assert.match(html, /href="\/login"/);
+    assert.match(html, /href="\/register"/);
     assert.match(html, /Preview Synthetic Sample \(London, 2015\)/);
     assert.match(html, /type="submit" disabled=""[^>]*>Save Profile/);
     assert.equal(html.includes('value="Kathmandu, Nepal"'), false);
@@ -226,6 +250,7 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
         React.createElement(UserChartWorkspace, { messagesByLocale: baseMessages })
       )
     );
+    assert.match(checkingHtml, /Checking session/);
     assert.equal(checkingHtml.includes("Authentication Required to Manage Saved Profiles"), false);
     assert.equal(checkingHtml.includes("Session Service Temporarily Unavailable"), false);
 
@@ -258,10 +283,11 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
       )
     );
     assert.match(unavailableHtml, /Session Service Temporarily Unavailable/);
-    assert.match(unavailableHtml, /Retry Session/);
+    assert.match(unavailableHtml, /Retry [Ss]ession/);
+    assert.match(unavailableHtml, /asha@example\.com/);
     assert.equal(unavailableHtml.includes("Authentication Required to Manage Saved Profiles"), false);
 
-    // 3. Authenticated state enables profile creation
+    // 3. Authenticated state enables profile creation and displays identity + sign-out controls
     const authedHtml = renderToStaticMarkup(
       React.createElement(
         AuthSessionProvider,
@@ -285,6 +311,10 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
       )
     );
     assert.equal(authedHtml.includes("Authentication Required to Manage Saved Profiles"), false);
+    assert.match(authedHtml, /asha@example\.com/);
+    assert.match(authedHtml, /Role:.*user/);
+    assert.match(authedHtml, />Sign out</);
+    assert.match(authedHtml, />Sign out all devices</);
     assert.match(authedHtml, /type="submit"[^>]*>Save Profile/);
   });
 

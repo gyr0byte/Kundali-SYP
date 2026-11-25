@@ -44,6 +44,8 @@ export interface AuthMutationResult {
   validationMessages?: readonly string[];
   user?: AuthSessionUser | null;
   sessionEstablished?: boolean;
+  retryAfter?: string | null;
+  retryAfterSeconds?: number | null;
 }
 
 export interface LogoutResult {
@@ -145,17 +147,21 @@ function parseValidAuthSessionUser(value: unknown): AuthSessionUser | null {
   };
 }
 
-function isValidAuthSessionUser(value: unknown): value is AuthSessionUser {
-  return parseValidAuthSessionUser(value) !== null;
-}
-
-function containsForbiddenTokenKey(payload: Record<string, unknown>): boolean {
-  if ("refresh_token" in payload || "refreshToken" in payload) {
+function containsForbiddenTokenKey(value: unknown, depth = 0): boolean {
+  if (depth > 8 || !value || typeof value !== "object") {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => containsForbiddenTokenKey(item, depth + 1));
+  }
+  const record = value as Record<string, unknown>;
+  if ("refresh_token" in record || "refreshToken" in record) {
     return true;
   }
-  const user = payload.user;
-  if (isPlainRecord(user) && ("refresh_token" in user || "refreshToken" in user)) {
-    return true;
+  for (const nested of Object.values(record)) {
+    if (containsForbiddenTokenKey(nested, depth + 1)) {
+      return true;
+    }
   }
   return false;
 }
@@ -178,24 +184,77 @@ function decodeBase64UrlText(input: string): string | null {
   return null;
 }
 
-function extractJwtExpiresAtMs(token: string): number | null {
+function isValidBase64UrlSegment(segment: string): boolean {
+  return segment.length > 0 && /^[A-Za-z0-9_-]+$/.test(segment);
+}
+
+/**
+ * Inspects unverified JWT structure and expiration claim strictly for client-side
+ * lifetime checks. Signature verification remains solely the backend's responsibility.
+ */
+function parseJwtExpirationMs(token: string): number | null {
   const parts = token.split(".");
-  if (parts.length !== 3 || !parts[1]) {
+  if (parts.length !== 3) {
     return null;
   }
-  const decoded = decodeBase64UrlText(parts[1]);
-  if (!decoded) {
+  const [rawHeader, rawPayload, rawSignature] = parts;
+  if (
+    !isValidBase64UrlSegment(rawHeader) ||
+    !isValidBase64UrlSegment(rawPayload) ||
+    !isValidBase64UrlSegment(rawSignature)
+  ) {
+    return null;
+  }
+  const decodedHeader = decodeBase64UrlText(rawHeader);
+  const decodedPayload = decodeBase64UrlText(rawPayload);
+  if (!decodedHeader || !decodedPayload) {
     return null;
   }
   try {
-    const payload = JSON.parse(decoded) as { exp?: unknown };
-    if (typeof payload.exp === "number" && Number.isFinite(payload.exp) && payload.exp > 0) {
-      return payload.exp * 1000;
+    const header = JSON.parse(decodedHeader);
+    const payload = JSON.parse(decodedPayload);
+    if (!isPlainRecord(header) || !isPlainRecord(payload)) {
+      return null;
     }
+    if (typeof header.alg !== "string" || !header.alg.trim()) {
+      return null;
+    }
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp) || payload.exp <= 0) {
+      return null;
+    }
+    return payload.exp * 1000;
   } catch {
     return null;
   }
-  return null;
+}
+
+function extractJwtExpiresAtMs(token: string): number | null {
+  return parseJwtExpirationMs(token);
+}
+
+function extractRetryAfter(
+  response: Response,
+  currentNowMs: number
+): { retryAfter: string | null; retryAfterSeconds: number | null } {
+  const raw = response.headers?.get("retry-after")?.trim() || null;
+  if (!raw) {
+    return { retryAfter: null, retryAfterSeconds: null };
+  }
+  if (/^\d+$/.test(raw)) {
+    const seconds = Number.parseInt(raw, 10);
+    return {
+      retryAfter: raw,
+      retryAfterSeconds: Number.isFinite(seconds) && seconds >= 0 ? seconds : null,
+    };
+  }
+  const targetMs = Date.parse(raw);
+  if (Number.isFinite(targetMs)) {
+    return {
+      retryAfter: raw,
+      retryAfterSeconds: Math.max(0, Math.ceil((targetMs - currentNowMs) / 1000)),
+    };
+  }
+  return { retryAfter: raw, retryAfterSeconds: null };
 }
 
 function parseSessionBroadcast(
@@ -215,26 +274,32 @@ function parseSessionBroadcast(
   }
 
   if (raw.type === "SESSION_UPDATED") {
-    if (!isValidAuthSessionUser(raw.user)) {
+    const validUser = parseValidAuthSessionUser(raw.user);
+    if (!validUser) {
       return null;
     }
     if (typeof raw.accessToken !== "string" || !raw.accessToken.trim()) {
       return null;
     }
+    const trimmedToken = raw.accessToken.trim();
+    const jwtExpiresAtMs = parseJwtExpirationMs(trimmedToken);
+    if (jwtExpiresAtMs === null || jwtExpiresAtMs <= currentNowMs) {
+      return null;
+    }
     if (
-      raw.expiresAtMs !== null &&
-      (typeof raw.expiresAtMs !== "number" ||
-        !Number.isFinite(raw.expiresAtMs) ||
-        raw.expiresAtMs <= currentNowMs)
+      typeof raw.expiresAtMs !== "number" ||
+      !Number.isFinite(raw.expiresAtMs) ||
+      raw.expiresAtMs <= currentNowMs ||
+      raw.expiresAtMs > jwtExpiresAtMs + 1000
     ) {
       return null;
     }
     return {
       type: "SESSION_UPDATED",
       senderId,
-      user: raw.user,
-      accessToken: raw.accessToken.trim(),
-      expiresAtMs: raw.expiresAtMs,
+      user: validUser,
+      accessToken: trimmedToken,
+      expiresAtMs: Math.min(raw.expiresAtMs, jwtExpiresAtMs),
     };
   }
 
@@ -623,10 +688,18 @@ export function createAuthSessionManager(
       const nextToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
       const nextUser = parseValidAuthSessionUser(body.user);
       if (nextToken && nextUser) {
-        const nextExpiry =
-          typeof body.expires_at_ms === "number" && Number.isFinite(body.expires_at_ms)
+        const rawExp =
+          typeof body.expires_at_ms === "number"
             ? body.expires_at_ms
-            : extractJwtExpiresAtMs(nextToken);
+            : typeof body.expires_at === "number"
+              ? body.expires_at
+              : null;
+        const jwtExp = extractJwtExpiresAtMs(nextToken);
+        const finiteRawExp = rawExp !== null && Number.isFinite(rawExp) ? rawExp : null;
+        const nextExpiry =
+          jwtExp !== null && finiteRawExp !== null
+            ? Math.min(finiteRawExp, jwtExp)
+            : (jwtExp ?? finiteRawExp);
         installAuthenticatedSession(nextToken, nextUser, nextExpiry);
         emit();
         broadcastSessionUpdated();
@@ -779,12 +852,15 @@ export function createAuthSessionManager(
       };
     }
 
+    const { retryAfter, retryAfterSeconds } = extractRetryAfter(response, now());
     return {
       ok: false,
       status: response.status,
       code: readStringField(body, "code", "REGISTER_FAILED"),
       message: readStringField(body, "message", "Registration could not be completed."),
       validationMessages: readValidationMessages(body),
+      retryAfter,
+      retryAfterSeconds,
     };
   }
 
@@ -819,10 +895,18 @@ export function createAuthSessionManager(
         const nextToken = typeof body.access_token === "string" ? body.access_token.trim() : "";
         const nextUser = parseValidAuthSessionUser(body.user);
         if (nextToken && nextUser) {
-          const nextExpiry =
-            typeof body.expires_at_ms === "number" && Number.isFinite(body.expires_at_ms)
+          const rawExp =
+            typeof body.expires_at_ms === "number"
               ? body.expires_at_ms
-              : extractJwtExpiresAtMs(nextToken);
+              : typeof body.expires_at === "number"
+                ? body.expires_at
+                : null;
+          const jwtExp = extractJwtExpiresAtMs(nextToken);
+          const finiteRawExp = rawExp !== null && Number.isFinite(rawExp) ? rawExp : null;
+          const nextExpiry =
+            jwtExp !== null && finiteRawExp !== null
+              ? Math.min(finiteRawExp, jwtExp)
+              : (jwtExp ?? finiteRawExp);
           sessionEpoch += 1;
           installAuthenticatedSession(nextToken, nextUser, nextExpiry);
           emit();
@@ -861,6 +945,7 @@ export function createAuthSessionManager(
         };
       }
 
+      const { retryAfter, retryAfterSeconds } = extractRetryAfter(response, now());
       return {
         ok: false,
         status: response.status,
@@ -868,6 +953,8 @@ export function createAuthSessionManager(
         message: readStringField(body, "message", "Sign in could not be completed."),
         validationMessages: readValidationMessages(body),
         sessionEstablished: false,
+        retryAfter,
+        retryAfterSeconds,
       };
     });
   }

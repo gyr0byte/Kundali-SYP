@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useOptionalAuthSession } from "@/components/auth/AuthSessionProvider";
 import { ApiClientError } from "@/lib/api/client";
@@ -10,6 +11,11 @@ import {
   updateProfile,
 } from "@/lib/api/profiles";
 import type { AuthSessionStatus } from "@/lib/auth/session-client";
+import {
+  classifyLogoutAllOutcome,
+  classifyLogoutOutcome,
+  type LogoutOutcomeBanner,
+} from "@/lib/auth/ui-helpers";
 import {
   classifySettingsChange,
   formatDegreeInSign,
@@ -104,6 +110,24 @@ export interface WorkspaceMessages {
   sessionUnavailableBannerTitle: string;
   sessionUnavailableBannerBody: string;
   retrySessionButton: string;
+  signInNavButton: string;
+  createAccountNavButton: string;
+  sessionCheckingHeaderLabel: string;
+  sessionUnavailableHeaderLabel: string;
+  signedInRolePrefix: string;
+  signOutButton: string;
+  signingOutButton: string;
+  signOutAllButton: string;
+  signingOutAllButton: string;
+  logoutConfirmTitle: string;
+  logoutConfirmBody: string;
+  logoutConfirmCancel: string;
+  logoutConfirmProceed: string;
+  logoutOutcomeConfirmed: string;
+  logoutOutcomeUnconfirmed: string;
+  logoutOutcomeNetworkError: string;
+  logoutAllConfirmedNotice: string;
+  logoutAllFailedNotice: string;
   loadingProfilesNotice: string;
   retryLoadButton: string;
   editProfileButton: string;
@@ -276,6 +300,10 @@ export function UserChartWorkspace({
   const [isSubmittingForm, setIsSubmittingForm] = useState<boolean>(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [isDeletingProfile, setIsDeletingProfile] = useState<boolean>(false);
+  const [isSigningOut, setIsSigningOut] = useState<boolean>(false);
+  const [isSigningOutAll, setIsSigningOutAll] = useState<boolean>(false);
+  const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState<boolean>(false);
+  const [sessionFeedback, setSessionFeedback] = useState<LogoutOutcomeBanner | null>(null);
   const [apiErrorBanner, setApiErrorBanner] = useState<string | null>(null);
   const [formServerErrors, setFormServerErrors] = useState<readonly string[]>([]);
   const [profileActionNotice, setProfileActionNotice] = useState<string | null>(null);
@@ -365,6 +393,7 @@ export function UserChartWorkspace({
         onLoaded: (items) => {
           setProfileState((prev) => applyLoadedProfiles(prev, items));
           setApiErrorBanner(null);
+          setSessionFeedback(null);
         },
         onUnauthenticated: (message) => {
           handleAuthFailure();
@@ -474,6 +503,7 @@ export function UserChartWorkspace({
         setSettingsOpen(false);
         setHighlightedFactId(null);
         setConfirmDeleteId(null);
+        setShowLogoutAllConfirm(false);
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -528,6 +558,46 @@ export function UserChartWorkspace({
       });
       setLocalAuthStatus("checking");
       await executeProfileListFetch(propOwnerKey);
+    }
+  }
+
+  async function handleSignOut() {
+    if (!session || isSigningOut || isSigningOutAll) return;
+    setIsSigningOut(true);
+    setSessionFeedback(null);
+    setShowLogoutAllConfirm(false);
+    setApiErrorBanner(null);
+    try {
+      const result = await session.logout();
+      profileLoadCoordinator.invalidate();
+      setProfileState((prev) => applySessionCleared(prev));
+      setConfirmDeleteId(null);
+      setFormMode("closed");
+      setFormServerErrors([]);
+      setSessionFeedback(classifyLogoutOutcome(result, t));
+    } finally {
+      setIsSigningOut(false);
+    }
+  }
+
+  async function handleConfirmLogoutAll() {
+    if (!session || isSigningOut || isSigningOutAll) return;
+    setIsSigningOutAll(true);
+    setSessionFeedback(null);
+    setApiErrorBanner(null);
+    try {
+      const result = await session.logoutAll();
+      setShowLogoutAllConfirm(false);
+      if (result.ok) {
+        profileLoadCoordinator.invalidate();
+        setProfileState((prev) => applySessionCleared(prev));
+        setConfirmDeleteId(null);
+        setFormMode("closed");
+        setFormServerErrors([]);
+      }
+      setSessionFeedback(classifyLogoutAllOutcome(result, t));
+    } finally {
+      setIsSigningOutAll(false);
     }
   }
 
@@ -781,6 +851,90 @@ export function UserChartWorkspace({
                 </button>
               ))}
             </div>
+
+            {authStatus === "checking" ? (
+              <span
+                role="status"
+                className="rounded border border-[#486581] bg-[#1D3B56] px-2.5 py-1 text-[11px] font-medium text-[#D8E2EC]"
+              >
+                {t.sessionCheckingHeaderLabel}
+              </span>
+            ) : null}
+
+            {authStatus === "unauthenticated" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href="/login"
+                  className="inline-flex min-h-[34px] items-center rounded border border-[#D8E2EC] bg-[#F7F6F1] px-2.5 py-1 text-xs font-semibold text-[#13293D] hover:bg-white"
+                >
+                  {t.signInNavButton}
+                </Link>
+                <Link
+                  href="/register"
+                  className="inline-flex min-h-[34px] items-center rounded border border-[#486581] bg-[#1D3B56] px-2.5 py-1 text-xs font-semibold text-[#F7F6F1] hover:bg-[#24496B]"
+                >
+                  {t.createAccountNavButton}
+                </Link>
+              </div>
+            ) : null}
+
+            {authStatus === "unavailable" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {session?.user ? (
+                  <span className="max-w-[180px] truncate rounded border border-[#486581] bg-[#1D3B56] px-2 py-1 text-[11px] text-[#D8E2EC]">
+                    {session.user.email}
+                  </span>
+                ) : null}
+                <span className="rounded border border-[#F3C68F] bg-[#3B2610] px-2.5 py-1 text-[11px] font-medium text-[#FEF3E2]">
+                  {t.sessionUnavailableHeaderLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleRetrySession()}
+                  className="inline-flex min-h-[34px] items-center rounded border border-[#D8E2EC] bg-[#F7F6F1] px-2.5 py-1 text-xs font-semibold text-[#13293D] hover:bg-white"
+                >
+                  {t.retrySessionButton}
+                </button>
+              </div>
+            ) : null}
+
+            {authStatus === "authenticated" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {session?.user ? (
+                  <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded border border-[#486581] bg-[#1D3B56] px-2.5 py-1 text-[11px] text-[#F7F6F1]">
+                    <span className="max-w-[180px] truncate font-medium sm:max-w-[240px]">
+                      {session.user.email}
+                    </span>
+                    <span className="rounded bg-[#13293D] px-1.5 py-0.5 font-mono text-[10px] uppercase text-[#A7D7C2]">
+                      {t.signedInRolePrefix} {session.user.role}
+                    </span>
+                  </span>
+                ) : null}
+                {session ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isSigningOut || isSigningOutAll}
+                      onClick={() => void handleSignOut()}
+                      className="inline-flex min-h-[34px] items-center rounded border border-[#D8E2EC] bg-[#F7F6F1] px-2.5 py-1 text-xs font-semibold text-[#13293D] hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSigningOut ? t.signingOutButton : t.signOutButton}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSigningOut || isSigningOutAll}
+                      onClick={() => {
+                        setShowLogoutAllConfirm(true);
+                        setSessionFeedback(null);
+                      }}
+                      className="inline-flex min-h-[34px] items-center rounded border border-[#FCA5A5] bg-[#4C1717] px-2.5 py-1 text-xs font-semibold text-[#FEF2F2] hover:bg-[#642020] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSigningOutAll ? t.signingOutAllButton : t.signOutAllButton}
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </header>
@@ -974,17 +1128,77 @@ export function UserChartWorkspace({
 
       {/* Main Content */}
       <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-5 sm:px-6">
+        {sessionFeedback ? (
+          <div
+            role={sessionFeedback.tone === "crimson" ? "alert" : "status"}
+            className={`mb-4 rounded border px-4 py-2.5 text-xs font-medium ${
+              sessionFeedback.tone === "emerald"
+                ? "border-[var(--kundali-emerald-border)] bg-[var(--kundali-emerald-bg)] text-[var(--kundali-emerald)]"
+                : sessionFeedback.tone === "amber"
+                  ? "border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] text-[var(--kundali-amber)]"
+                  : "border-[var(--kundali-crimson-border)] bg-[var(--kundali-crimson-bg)] text-[var(--kundali-crimson)]"
+            }`}
+          >
+            {sessionFeedback.message}
+          </div>
+        ) : null}
+
+        {showLogoutAllConfirm ? (
+          <div
+            role="alertdialog"
+            aria-label={t.logoutConfirmTitle}
+            className="mb-4 rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-crimson-bg)] px-4 py-3 text-xs"
+          >
+            <p className="font-semibold text-[var(--kundali-crimson)]">{t.logoutConfirmTitle}</p>
+            <p className="mt-1 leading-relaxed text-[var(--kundali-ink)]">{t.logoutConfirmBody}</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={isSigningOutAll}
+                onClick={() => void handleConfirmLogoutAll()}
+                className="inline-flex min-h-[36px] items-center rounded bg-[var(--kundali-crimson)] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSigningOutAll ? t.signingOutAllButton : t.logoutConfirmProceed}
+              </button>
+              <button
+                type="button"
+                disabled={isSigningOutAll}
+                onClick={() => setShowLogoutAllConfirm(false)}
+                className="inline-flex min-h-[36px] items-center rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--kundali-ink)]"
+              >
+                {t.logoutConfirmCancel}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {authStatus === "unauthenticated" ? (
           <div
             role="status"
-            className="mb-4 rounded border border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] px-4 py-3 text-xs"
+            className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded border border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] px-4 py-3 text-xs"
           >
-            <p className="font-semibold text-[var(--kundali-amber)]">
-              {t.authRequiredBannerTitle}
-            </p>
-            <p className="mt-1 leading-relaxed text-[var(--kundali-ink)]">
-              {t.authRequiredBannerBody}
-            </p>
+            <div>
+              <p className="font-semibold text-[var(--kundali-amber)]">
+                {t.authRequiredBannerTitle}
+              </p>
+              <p className="mt-1 leading-relaxed text-[var(--kundali-ink)]">
+                {t.authRequiredBannerBody}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href="/login"
+                className="inline-flex min-h-[36px] items-center rounded bg-[var(--kundali-navy)] px-3 py-1.5 text-xs font-semibold text-[var(--kundali-cream)] hover:bg-[var(--kundali-navy-hover)]"
+              >
+                {t.signInNavButton}
+              </Link>
+              <Link
+                href="/register"
+                className="inline-flex min-h-[36px] items-center rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--kundali-navy)] hover:bg-[var(--kundali-cream)]"
+              >
+                {t.createAccountNavButton}
+              </Link>
+            </div>
           </div>
         ) : null}
 
