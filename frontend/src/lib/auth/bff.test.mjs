@@ -11,6 +11,12 @@ const SRC_ROOT = path.resolve(__dirname, "../..");
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "server-only") {
+      return {
+        url: "data:text/javascript,export default {};",
+        shortCircuit: true,
+      };
+    }
     if (specifier.startsWith("@/")) {
       const mapped = path.join(SRC_ROOT, specifier.slice(2));
       for (const ext of ["", ".ts", ".tsx", ".json"]) {
@@ -318,6 +324,7 @@ describe("BFF register and login routes", () => {
 
     // 1. Happy path
     const happyFetch = async (url, init) => {
+      assert.equal(init.redirect, "error");
       if (url.endsWith("/auth/login")) {
         return new Response(
           JSON.stringify({
@@ -594,6 +601,7 @@ describe("BFF logout and logout-all routes", () => {
         isProduction: false,
         fetchImpl: async (url, init) => {
           assert.equal(url, "http://127.0.0.1:8000/api/v1/auth/logout");
+          assert.equal(init.redirect, "error");
           assert.deepEqual(JSON.parse(init.body), { refresh_token: "revokable_tok" });
           return new Response(null, { status: 204 });
         },
@@ -604,7 +612,8 @@ describe("BFF logout and logout-all routes", () => {
     assert.match(okRes.headers.get("set-cookie") ?? "", /Max-Age=0/);
     assert.deepEqual(await okRes.json(), {
       local_cookie_cleared: true,
-      backend_revoked: true,
+      backend_logout_request_completed: true,
+      backend_revocation_state: "logout_request_accepted",
     });
 
     // 2. Backend unavailable: still clears local cookie, never falsely reports backend revocation
@@ -623,8 +632,8 @@ describe("BFF logout and logout-all routes", () => {
     assert.match(downRes.headers.get("set-cookie") ?? "", /Max-Age=0/);
     assert.deepEqual(await downRes.json(), {
       local_cookie_cleared: true,
-      backend_revoked: false,
-      reason: "backend_unconfirmed",
+      backend_logout_request_completed: false,
+      backend_revocation_state: "backend_unconfirmed",
     });
 
     // 3. Missing cookie: no backend call, clears cookie idempotently
@@ -641,8 +650,8 @@ describe("BFF logout and logout-all routes", () => {
     assert.match(missingRes.headers.get("set-cookie") ?? "", /Max-Age=0/);
     assert.deepEqual(await missingRes.json(), {
       local_cookie_cleared: true,
-      backend_revoked: false,
-      reason: "missing_cookie",
+      backend_logout_request_completed: false,
+      backend_revocation_state: "missing_cookie",
     });
   });
 
@@ -662,7 +671,9 @@ describe("BFF logout and logout-all routes", () => {
     assert.equal(called, false);
     assert.equal(noAuthRes.status, 401);
     assert.equal(noAuthRes.headers.get("set-cookie"), null);
-    assert.equal((await noAuthRes.json()).backend_revoked, false);
+    const noAuthJson = await noAuthRes.json();
+    assert.equal(noAuthJson.backend_logout_request_completed, false);
+    assert.equal(noAuthJson.backend_revocation_state, "unauthenticated");
 
     // 2. Stale access token returns 401 without clearing refresh cookie (allowing Commit 2 refresh)
     const staleRes = await handleLogoutAll(
@@ -682,7 +693,8 @@ describe("BFF logout and logout-all routes", () => {
     assert.equal(staleRes.status, 401);
     assert.equal(staleRes.headers.get("set-cookie"), null);
     const staleJson = await staleRes.json();
-    assert.equal(staleJson.backend_revoked, false);
+    assert.equal(staleJson.backend_logout_request_completed, false);
+    assert.equal(staleJson.backend_revocation_state, "backend_rejected");
     assert.equal(staleJson.local_cookie_cleared, false);
 
     // 3. Backend unavailable returns 503 with honest unrevoked status
@@ -698,7 +710,9 @@ describe("BFF logout and logout-all routes", () => {
       }
     );
     assert.equal(downRes.status, 503);
-    assert.equal((await downRes.json()).backend_revoked, false);
+    const downJson = await downRes.json();
+    assert.equal(downJson.backend_logout_request_completed, false);
+    assert.equal(downJson.backend_revocation_state, "backend_unconfirmed");
 
     // 4. Success clears local refresh cookie and reports confirmed revocation
     const okRes = await handleLogoutAll(
@@ -710,6 +724,7 @@ describe("BFF logout and logout-all routes", () => {
         isProduction: false,
         fetchImpl: async (url, init) => {
           assert.equal(url, "http://127.0.0.1:8000/api/v1/auth/logout-all");
+          assert.equal(init.redirect, "error");
           assert.equal(init.headers.Authorization, "Bearer valid_token");
           return new Response(null, { status: 204 });
         },
@@ -720,7 +735,8 @@ describe("BFF logout and logout-all routes", () => {
     assert.match(okRes.headers.get("set-cookie") ?? "", /Max-Age=0/);
     assert.deepEqual(await okRes.json(), {
       local_cookie_cleared: true,
-      backend_revoked: true,
+      backend_logout_request_completed: true,
+      backend_revocation_state: "all_refresh_tokens_revoked",
     });
   });
 });

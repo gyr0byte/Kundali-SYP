@@ -15,6 +15,8 @@
  *   concurrency hardening belongs to a separate backend evaluation before prod.
  */
 
+import "server-only";
+
 export const REFRESH_COOKIE_NAME = "kundali_refresh_token";
 export const REFRESH_COOKIE_PATH = "/api/auth";
 export const REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
@@ -508,6 +510,7 @@ async function fetchBackendJson(
       headers,
       body: serializedBody,
       cache: "no-store",
+      redirect: "error",
     });
     const body = await safeParseJson(response);
     return { response, body };
@@ -860,8 +863,8 @@ export async function handleLogout(request: Request, config: BffConfig = {}): Pr
     return bffJsonResponse(
       {
         local_cookie_cleared: true,
-        backend_revoked: false,
-        reason: "missing_cookie",
+        backend_logout_request_completed: false,
+        backend_revocation_state: "missing_cookie",
       },
       { status: 200, setCookieHeader: clearCookieHeader }
     );
@@ -875,8 +878,8 @@ export async function handleLogout(request: Request, config: BffConfig = {}): Pr
     return bffJsonResponse(
       {
         local_cookie_cleared: true,
-        backend_revoked: false,
-        reason: "backend_unconfirmed",
+        backend_logout_request_completed: false,
+        backend_revocation_state: "backend_unconfirmed",
       },
       { status: 200, setCookieHeader: clearCookieHeader }
     );
@@ -885,7 +888,8 @@ export async function handleLogout(request: Request, config: BffConfig = {}): Pr
   return bffJsonResponse(
     {
       local_cookie_cleared: true,
-      backend_revoked: true,
+      backend_logout_request_completed: true,
+      backend_revocation_state: "logout_request_accepted",
     },
     { status: 200, setCookieHeader: clearCookieHeader }
   );
@@ -908,7 +912,11 @@ export async function handleLogoutAll(request: Request, config: BffConfig = {}):
       status: 401,
       code: "AUTH_REQUIRED",
       message: "Valid Bearer access token is required for logout-all.",
-      extra: { local_cookie_cleared: false, backend_revoked: false },
+      extra: {
+        local_cookie_cleared: false,
+        backend_logout_request_completed: false,
+        backend_revocation_state: "unauthenticated",
+      },
     });
   }
 
@@ -921,7 +929,11 @@ export async function handleLogoutAll(request: Request, config: BffConfig = {}):
       status: 503,
       code: "BACKEND_UNAVAILABLE",
       message: "Authentication service is temporarily unavailable.",
-      extra: { local_cookie_cleared: false, backend_revoked: false },
+      extra: {
+        local_cookie_cleared: false,
+        backend_logout_request_completed: false,
+        backend_revocation_state: "backend_unconfirmed",
+      },
     });
   }
 
@@ -932,7 +944,11 @@ export async function handleLogoutAll(request: Request, config: BffConfig = {}):
       status: response.status,
       code: response.status === 401 ? "UNAUTHORIZED" : "FORBIDDEN",
       message: "Access token rejected by backend during logout-all.",
-      extra: { local_cookie_cleared: false, backend_revoked: false },
+      extra: {
+        local_cookie_cleared: false,
+        backend_logout_request_completed: false,
+        backend_revocation_state: "backend_rejected",
+      },
     });
   }
 
@@ -941,14 +957,19 @@ export async function handleLogoutAll(request: Request, config: BffConfig = {}):
       status: response.status >= 500 ? 502 : response.status,
       code: "BACKEND_UNAVAILABLE",
       message: "Backend session revocation failed.",
-      extra: { local_cookie_cleared: false, backend_revoked: false },
+      extra: {
+        local_cookie_cleared: false,
+        backend_logout_request_completed: false,
+        backend_revocation_state: "backend_unconfirmed",
+      },
     });
   }
 
   return bffJsonResponse(
     {
       local_cookie_cleared: true,
-      backend_revoked: true,
+      backend_logout_request_completed: true,
+      backend_revocation_state: "all_refresh_tokens_revoked",
     },
     {
       status: 200,

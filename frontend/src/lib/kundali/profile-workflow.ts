@@ -1,5 +1,11 @@
 import { SAMPLE_NORTH_LONDON_PROFILE } from "./sample-north-london.ts";
-import type { BirthProfile, BirthProfileCreatePayload, CalendarType, TimeCertainty } from "./types.ts";
+import type {
+  AccessTokenProvider,
+  BirthProfile,
+  BirthProfileCreatePayload,
+  CalendarType,
+  TimeCertainty,
+} from "./types.ts";
 
 export interface ProfileWorkspaceState {
   savedProfiles: BirthProfile[];
@@ -202,6 +208,104 @@ export function activateSyntheticSamplePreview(
     activeProfileId: SAMPLE_NORTH_LONDON_PROFILE.id,
     previewSyntheticSample: true,
   };
+}
+
+export function applySessionCleared(state: ProfileWorkspaceState): ProfileWorkspaceState {
+  return {
+    savedProfiles: [],
+    activeProfileId: state.previewSyntheticSample ? SAMPLE_NORTH_LONDON_PROFILE.id : null,
+    previewSyntheticSample: state.previewSyntheticSample,
+  };
+}
+
+export type WorkspaceSessionStatus =
+  | "checking"
+  | "authenticated"
+  | "unauthenticated"
+  | "unavailable";
+
+export function reconcileWorkspaceSessionTransition(params: {
+  sessionStatus: WorkspaceSessionStatus;
+  userId: string | null;
+  loadedOwnerKey: string | null;
+}): "wait" | "clear" | "preserve" | "fetch" | "noop" {
+  if (params.sessionStatus === "checking") {
+    return "wait";
+  }
+  if (params.sessionStatus === "unavailable") {
+    return "preserve";
+  }
+  if (params.sessionStatus === "unauthenticated") {
+    return "clear";
+  }
+  const nextOwner = params.userId ?? "session-user";
+  return params.loadedOwnerKey === nextOwner ? "noop" : "fetch";
+}
+
+export function classifyWorkspaceAuthError(params: {
+  errorCode: string | null;
+  liveSessionStatus?: WorkspaceSessionStatus | null;
+}): "unavailable" | "unauthenticated" | "other" {
+  if (params.errorCode !== "AUTH_REQUIRED" && params.errorCode !== "UNAUTHORIZED") {
+    return "other";
+  }
+  if (params.liveSessionStatus === "unavailable") {
+    return "unavailable";
+  }
+  return "unauthenticated";
+}
+
+export async function fetchWorkspaceProfilesSafely(params: {
+  getAccessToken?: AccessTokenProvider;
+  fetchList: (resolvedToken: string) => Promise<BirthProfile[]>;
+  liveSessionStatus?: () => WorkspaceSessionStatus | null;
+  unavailableFallbackMessage: string;
+}): Promise<
+  | { kind: "loaded"; items: BirthProfile[] }
+  | { kind: "unauthenticated"; message: string | null }
+  | { kind: "unavailable"; message: string }
+  | { kind: "error"; message: string }
+> {
+  if (!params.getAccessToken) {
+    return { kind: "unauthenticated", message: null };
+  }
+  try {
+    const rawToken = await params.getAccessToken();
+    const validToken = typeof rawToken === "string" ? rawToken.trim() : "";
+    if (!validToken) {
+      const outcome = classifyWorkspaceAuthError({
+        errorCode: "AUTH_REQUIRED",
+        liveSessionStatus: params.liveSessionStatus?.() ?? null,
+      });
+      return outcome === "unavailable"
+        ? { kind: "unavailable", message: params.unavailableFallbackMessage }
+        : { kind: "unauthenticated", message: null };
+    }
+    const items = await params.fetchList(validToken);
+    return { kind: "loaded", items };
+  } catch (err) {
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? String((err as { code?: unknown }).code)
+        : null;
+    const outcome = classifyWorkspaceAuthError({
+      errorCode: code,
+      liveSessionStatus: params.liveSessionStatus?.() ?? null,
+    });
+    if (outcome === "unavailable") {
+      return { kind: "unavailable", message: params.unavailableFallbackMessage };
+    }
+    if (outcome === "unauthenticated") {
+      return {
+        kind: "unauthenticated",
+        message: err instanceof Error ? err.message : "Authentication required.",
+      };
+    }
+    return {
+      kind: "error",
+      message: err instanceof Error ? err.message : "Unable to load saved birth profiles.",
+    };
+  }
 }
 
 export function resolveVisibleProfiles(state: ProfileWorkspaceState): BirthProfile[] {

@@ -15,6 +15,7 @@ import {
   applyCreatedProfile,
   applyDeletedProfile,
   applyLoadedProfiles,
+  applySessionCleared,
   applyUpdatedProfile,
   createInitialWorkspaceState,
   getInitialProfileFormValues,
@@ -304,5 +305,90 @@ describe("Birth profile form defaults and multi-profile workflow state", () => {
     state = applyDeletedProfile(state, "bbbb-2");
     assert.equal(state.savedProfiles.length, 1);
     assert.equal(state.activeProfileId, "aaaa-1");
+
+    // Clearing definitive session clears saved profiles while keeping synthetic sample preview accessible
+    state = activateSyntheticSamplePreview(state);
+    state = applySessionCleared(state);
+    assert.equal(state.savedProfiles.length, 0);
+    assert.equal(state.activeProfileId, SAMPLE_NORTH_LONDON_PROFILE.id);
+    assert.equal(resolveActiveProfile(state)?.is_synthetic_sample, true);
+  });
+});
+
+describe("API client single 401 refresh-and-retry integration", () => {
+  it("retries at most once on HTTP 401, stops on second 401, and never retries 403/422", async () => {
+    const authHeaders = [];
+    let refreshCalls = 0;
+
+    const okAfterRefresh = await listProfiles({
+      getAccessToken: () => "expired-tok",
+      onUnauthorizedRefresh: async (failedTok) => {
+        assert.equal(failedTok, "expired-tok");
+        refreshCalls += 1;
+        return "fresh-tok";
+      },
+      fetchImpl: async (_url, init) => {
+        authHeaders.push(init.headers.Authorization);
+        if (authHeaders.length === 1) {
+          return new Response(JSON.stringify({ detail: "Expired" }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ items: [], total: 0, limit: 25, offset: 0 }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      },
+    });
+    assert.equal(okAfterRefresh.total, 0);
+    assert.equal(refreshCalls, 1);
+    assert.deepEqual(authHeaders, ["Bearer expired-tok", "Bearer fresh-tok"]);
+
+    // Stops cleanly after second 401 without looping
+    let double401RefreshCount = 0;
+    let double401FetchCount = 0;
+    await assert.rejects(
+      () =>
+        listProfiles({
+          getAccessToken: () => "stale-1",
+          onUnauthorizedRefresh: async () => {
+            double401RefreshCount += 1;
+            return "still-bad-2";
+          },
+          fetchImpl: async () => {
+            double401FetchCount += 1;
+            return new Response(JSON.stringify({ detail: "Unauthorized" }), {
+              status: 401,
+              headers: { "content-type": "application/json" },
+            });
+          },
+        }),
+      (err) => err instanceof ApiClientError && err.code === "UNAUTHORIZED" && err.status === 401
+    );
+    assert.equal(double401RefreshCount, 1);
+    assert.equal(double401FetchCount, 2);
+
+    // Never invokes refresh hook on 403 or 422
+    for (const status of [403, 422]) {
+      let unwantedRefresh = 0;
+      await assert.rejects(
+        () =>
+          listProfiles({
+            getAccessToken: () => "valid-tok",
+            onUnauthorizedRefresh: async () => {
+              unwantedRefresh += 1;
+              return "should-not-happen";
+            },
+            fetchImpl: async () =>
+              new Response(JSON.stringify({ detail: "Non-auth error" }), {
+                status,
+                headers: { "content-type": "application/json" },
+              }),
+          }),
+        (err) => err instanceof ApiClientError && err.status === status
+      );
+      assert.equal(unwantedRefresh, 0);
+    }
   });
 });

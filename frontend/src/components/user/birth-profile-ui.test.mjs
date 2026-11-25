@@ -64,6 +64,12 @@ const React = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const enMessages = JSON.parse(readFileSync(path.join(SRC_ROOT, "i18n/en.json"), "utf8"));
 const neMessages = JSON.parse(readFileSync(path.join(SRC_ROOT, "i18n/ne.json"), "utf8"));
+const { AuthSessionProvider } = await import("../auth/AuthSessionProvider.tsx");
+const {
+  classifyWorkspaceAuthError,
+  fetchWorkspaceProfilesSafely,
+  reconcileWorkspaceSessionTransition,
+} = await import("../../lib/kundali/profile-workflow.ts");
 const { BirthProfileForm } = await import("./BirthProfileForm.tsx");
 const { UserChartWorkspace } = await import("./UserChartWorkspace.tsx");
 
@@ -173,5 +179,182 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
     assert.match(html, /value="28\.2096"/);
     assert.match(html, /value="83\.9856"/);
     assert.match(html, /id="bp-time"[^>]*disabled=""/);
+  });
+
+  it("renders AuthSessionProvider + UserChartWorkspace session checking, unavailable, and authenticated states cleanly", () => {
+    function createStubManager(snapshot) {
+      return {
+        getSnapshot: () => snapshot,
+        subscribe: () => () => {},
+        bootstrap: async () => snapshot,
+        getAccessToken: async () => (snapshot.isAuthenticated ? "tok" : null),
+        refreshSession: async () => null,
+        refreshOnUnauthorized: async () => null,
+        retrySession: async () => snapshot,
+        register: async () => ({ ok: false, status: 500 }),
+        login: async () => ({ ok: false, status: 500 }),
+        logout: async () => ({
+          localCookieCleared: true,
+          backendLogoutRequestCompleted: true,
+          backendRevocationState: "logout_request_accepted",
+        }),
+        logoutAll: async () => ({
+          ok: false,
+          status: 401,
+          localCookieCleared: false,
+          backendLogoutRequestCompleted: false,
+          backendRevocationState: "unauthenticated",
+        }),
+        dispose() {},
+      };
+    }
+
+    const baseMessages = { en: enMessages.userWorkspace, ne: neMessages.userWorkspace };
+
+    // 1. Checking state avoids premature "Authentication Required" alarm
+    const checkingHtml = renderToStaticMarkup(
+      React.createElement(
+        AuthSessionProvider,
+        { manager: createStubManager({ status: "checking", user: null, isAuthenticated: false, error: null, hasRecoverableSession: false }) },
+        React.createElement(UserChartWorkspace, { messagesByLocale: baseMessages })
+      )
+    );
+    assert.equal(checkingHtml.includes("Authentication Required to Manage Saved Profiles"), false);
+    assert.equal(checkingHtml.includes("Session Service Temporarily Unavailable"), false);
+
+    // 2. Unavailable state renders recoverable retry alert cleanly
+    const unavailableHtml = renderToStaticMarkup(
+      React.createElement(
+        AuthSessionProvider,
+        {
+          manager: createStubManager({
+            status: "unavailable",
+            user: {
+              id: "u1",
+              email: "asha@example.com",
+              role: "user",
+              language: "ne",
+              is_active: true,
+              created_at: "2026-11-25T10:00:00Z",
+            },
+            isAuthenticated: false,
+            error: {
+              code: "BACKEND_UNAVAILABLE",
+              status: 503,
+              message: "Backend session verification temporarily unreachable.",
+              retryable: true,
+            },
+            hasRecoverableSession: true,
+          }),
+        },
+        React.createElement(UserChartWorkspace, { messagesByLocale: baseMessages })
+      )
+    );
+    assert.match(unavailableHtml, /Session Service Temporarily Unavailable/);
+    assert.match(unavailableHtml, /Retry Session/);
+    assert.equal(unavailableHtml.includes("Authentication Required to Manage Saved Profiles"), false);
+
+    // 3. Authenticated state enables profile creation
+    const authedHtml = renderToStaticMarkup(
+      React.createElement(
+        AuthSessionProvider,
+        {
+          manager: createStubManager({
+            status: "authenticated",
+            user: {
+              id: "u1",
+              email: "asha@example.com",
+              role: "user",
+              language: "ne",
+              is_active: true,
+              created_at: "2026-11-25T10:00:00Z",
+            },
+            isAuthenticated: true,
+            error: null,
+            hasRecoverableSession: true,
+          }),
+        },
+        React.createElement(UserChartWorkspace, { messagesByLocale: baseMessages })
+      )
+    );
+    assert.equal(authedHtml.includes("Authentication Required to Manage Saved Profiles"), false);
+    assert.match(authedHtml, /type="submit"[^>]*>Save Profile/);
+  });
+
+  it("handles rejected getAccessToken, AUTH_REQUIRED delete errors, and checking/unavailable/unauthenticated transitions safely", async () => {
+    // 1. Transition guard prevents fetches during checking, unavailable, and unauthenticated
+    assert.equal(
+      reconcileWorkspaceSessionTransition({
+        sessionStatus: "checking",
+        userId: null,
+        loadedOwnerKey: null,
+      }),
+      "wait"
+    );
+    assert.equal(
+      reconcileWorkspaceSessionTransition({
+        sessionStatus: "unavailable",
+        userId: "u1",
+        loadedOwnerKey: "u1",
+      }),
+      "preserve"
+    );
+    assert.equal(
+      reconcileWorkspaceSessionTransition({
+        sessionStatus: "unauthenticated",
+        userId: null,
+        loadedOwnerKey: "u1",
+      }),
+      "clear"
+    );
+    assert.equal(
+      reconcileWorkspaceSessionTransition({
+        sessionStatus: "authenticated",
+        userId: "u1",
+        loadedOwnerKey: "u1",
+      }),
+      "noop"
+    );
+    assert.equal(
+      reconcileWorkspaceSessionTransition({
+        sessionStatus: "authenticated",
+        userId: "u1",
+        loadedOwnerKey: null,
+      }),
+      "fetch"
+    );
+
+    // 2. AUTH_REQUIRED & UNAUTHORIZED preserve form/profiles during transient session unavailability,
+    // and clear cleanly during definitive unauthenticated transitions (including delete handler!)
+    assert.equal(
+      classifyWorkspaceAuthError({
+        errorCode: "AUTH_REQUIRED",
+        liveSessionStatus: "unauthenticated",
+      }),
+      "unauthenticated"
+    );
+    assert.equal(
+      classifyWorkspaceAuthError({
+        errorCode: "UNAUTHORIZED",
+        liveSessionStatus: "unavailable",
+      }),
+      "unavailable"
+    );
+
+    // 3. Rejected getAccessToken() promise is caught cleanly inside fetchWorkspaceProfilesSafely
+    let fetchAttempted = false;
+    const rejectedResult = await fetchWorkspaceProfilesSafely({
+      getAccessToken: async () => {
+        throw new Error("Session provider failed unexpectedly");
+      },
+      fetchList: async () => {
+        fetchAttempted = true;
+        return [];
+      },
+      unavailableFallbackMessage: "Retry later",
+    });
+    assert.equal(fetchAttempted, false);
+    assert.equal(rejectedResult.kind, "error");
+    assert.match(rejectedResult.message, /Session provider failed unexpectedly/);
   });
 });

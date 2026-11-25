@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useOptionalAuthSession } from "@/components/auth/AuthSessionProvider";
 import { ApiClientError } from "@/lib/api/client";
 import {
   createProfile,
@@ -8,6 +9,7 @@ import {
   listProfiles,
   updateProfile,
 } from "@/lib/api/profiles";
+import type { AuthSessionStatus } from "@/lib/auth/session-client";
 import {
   classifySettingsChange,
   formatDegreeInSign,
@@ -23,8 +25,12 @@ import {
   applyCreatedProfile,
   applyDeletedProfile,
   applyLoadedProfiles,
+  applySessionCleared,
   applyUpdatedProfile,
+  classifyWorkspaceAuthError,
   createInitialWorkspaceState,
+  fetchWorkspaceProfilesSafely,
+  reconcileWorkspaceSessionTransition,
   resolveActiveProfile,
   resolveVisibleProfiles,
   type ProfileWorkspaceState,
@@ -96,6 +102,9 @@ export interface WorkspaceMessages {
   authRequiredBannerTitle: string;
   authRequiredBannerBody: string;
   authFormLockedNotice: string;
+  sessionUnavailableBannerTitle: string;
+  sessionUnavailableBannerBody: string;
+  retrySessionButton: string;
   loadingProfilesNotice: string;
   retryLoadButton: string;
   editProfileButton: string;
@@ -188,8 +197,10 @@ export interface WorkspaceMessages {
 
 interface UserChartWorkspaceProps {
   messagesByLocale: Record<Locale, WorkspaceMessages>;
-  /** Optional injected access token provider; omitted until frontend auth milestone lands. */
+  /** Optional injected access token provider for tests or custom embedding. */
   getAccessToken?: AccessTokenProvider;
+  /** Optional single-retry 401 refresh callback for tests or custom embedding. */
+  onUnauthorizedRefresh?: (failedToken?: string) => Promise<string | null>;
   /** Optional API base URL override for environment wiring or tests. */
   apiBaseUrl?: string;
 }
@@ -241,15 +252,26 @@ function computeProfileState(
 export function UserChartWorkspace({
   messagesByLocale,
   getAccessToken,
+  onUnauthorizedRefresh,
   apiBaseUrl,
 }: UserChartWorkspaceProps) {
+  const session = useOptionalAuthSession();
+  const hasExplicitTokenProp = getAccessToken !== undefined;
+  const effectiveGetAccessToken = hasExplicitTokenProp
+    ? getAccessToken
+    : session?.getAccessToken;
+  const effectiveOnUnauthorizedRefresh =
+    onUnauthorizedRefresh ?? (hasExplicitTokenProp ? undefined : session?.onUnauthorizedRefresh);
+
   const [locale, setLocale] = useState<Locale>("en");
   const [profileState, setProfileState] = useState<ProfileWorkspaceState>(
     createInitialWorkspaceState
   );
-  const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "unauthenticated">(
-    () => (getAccessToken ? "checking" : "unauthenticated")
+  const [localAuthStatus, setLocalAuthStatus] = useState<AuthSessionStatus>(() =>
+    hasExplicitTokenProp ? "checking" : session ? session.status : "unauthenticated"
   );
+  const authStatus: AuthSessionStatus =
+    !hasExplicitTokenProp && session ? session.status : localAuthStatus;
   const [isLoadingProfiles, setIsLoadingProfiles] = useState<boolean>(false);
   const [formMode, setFormMode] = useState<"closed" | "create" | "edit">("closed");
   const [isSubmittingForm, setIsSubmittingForm] = useState<boolean>(false);
@@ -269,88 +291,169 @@ export function UserChartWorkspace({
   const [mobilePane, setMobilePane] = useState<"chart" | "secondary">("chart");
   const [highlightedFactId, setHighlightedFactId] = useState<string | null>(null);
 
+  const inFlightLoadRef = useRef<{
+    ownerKey: string;
+    promise: Promise<BirthProfile[] | null>;
+  } | null>(null);
+  const loadedOwnerKeyRef = useRef<string | null>(null);
+
   const t = messagesByLocale[locale];
   const isAuthenticated = authStatus === "authenticated";
-  const visibleProfiles = resolveVisibleProfiles(profileState);
-  const activeProfile = resolveActiveProfile(profileState);
+  const displayedProfileState =
+    authStatus === "unauthenticated" ? applySessionCleared(profileState) : profileState;
+  const visibleProfiles = resolveVisibleProfiles(displayedProfileState);
+  const activeProfile = resolveActiveProfile(displayedProfileState);
   const { state: calcState, chart } = computeProfileState(activeProfile, appliedSettings);
   const provenanceStatus = getProvenanceStatus(chart, calcState);
   const unknownTimeMode = isUnknownTimeProfile(activeProfile);
   const sensitivityFact = getSensitivityFact(chart);
 
-  const loadSavedProfilesFromApi = useCallback(async () => {
-    const token = getAccessToken ? await getAccessToken() : null;
-    const validToken = typeof token === "string" ? token.trim() : "";
-    if (!validToken) {
-      setAuthStatus("unauthenticated");
-      setIsLoadingProfiles(false);
-      setApiErrorBanner(null);
-      return;
-    }
-
-    setAuthStatus("authenticated");
-    setIsLoadingProfiles(true);
-    setApiErrorBanner(null);
-    try {
-      const response = await listProfiles({ getAccessToken, baseUrl: apiBaseUrl });
-      setProfileState((prev) => applyLoadedProfiles(prev, response.items));
-    } catch (err) {
-      if (
-        err instanceof ApiClientError &&
-        (err.code === "AUTH_REQUIRED" || err.code === "UNAUTHORIZED")
-      ) {
-        setAuthStatus("unauthenticated");
-        setApiErrorBanner(err.message);
-      } else {
-        setApiErrorBanner(
-          err instanceof Error ? err.message : "Unable to load saved birth profiles."
-        );
+  const handleAuthFailure = useCallback((): "unavailable" | "unauthenticated" => {
+    if (!hasExplicitTokenProp && session) {
+      const live = session.getSnapshot();
+      if (live.status === "unavailable") {
+        // Keep loaded profiles, selection, staged settings, and unsaved form input
+        // intact while the authentication service recovers.
+        return "unavailable";
       }
-    } finally {
-      setIsLoadingProfiles(false);
     }
-  }, [apiBaseUrl, getAccessToken]);
+    if (hasExplicitTokenProp || !session) {
+      setLocalAuthStatus("unauthenticated");
+    }
+    loadedOwnerKeyRef.current = null;
+    setProfileState((prev) => applySessionCleared(prev));
+    setConfirmDeleteId(null);
+    setFormMode("closed");
+    return "unauthenticated";
+  }, [hasExplicitTokenProp, session]);
+
+  const executeProfileListFetch = useCallback(
+    (ownerKey: string): Promise<BirthProfile[] | null> => {
+      if (inFlightLoadRef.current?.ownerKey === ownerKey) {
+        return inFlightLoadRef.current.promise;
+      }
+
+      let promise: Promise<BirthProfile[] | null> | null = null;
+      promise = (async (): Promise<BirthProfile[] | null> => {
+        await Promise.resolve();
+        setIsLoadingProfiles(true);
+        setApiErrorBanner(null);
+
+        try {
+          const result = await fetchWorkspaceProfilesSafely({
+            getAccessToken: effectiveGetAccessToken,
+            unavailableFallbackMessage: t.sessionUnavailableBannerBody,
+            liveSessionStatus: () =>
+              !hasExplicitTokenProp && session ? session.getSnapshot().status : null,
+            fetchList: async (validToken) => {
+              if (hasExplicitTokenProp || !session) {
+                setLocalAuthStatus("authenticated");
+              }
+              const response = await listProfiles({
+                getAccessToken: () => validToken,
+                onUnauthorizedRefresh: effectiveOnUnauthorizedRefresh,
+                baseUrl: apiBaseUrl,
+              });
+              return response.items;
+            },
+          });
+
+          if (result.kind === "loaded") {
+            loadedOwnerKeyRef.current = ownerKey;
+            setProfileState((prev) => applyLoadedProfiles(prev, result.items));
+            return result.items;
+          }
+
+          if (result.kind === "unauthenticated") {
+            handleAuthFailure();
+            setApiErrorBanner(result.message);
+            return null;
+          }
+
+          if (result.kind === "unavailable") {
+            if (hasExplicitTokenProp || !session) {
+              setLocalAuthStatus((prev) => (prev === "checking" ? "unavailable" : prev));
+            }
+            setApiErrorBanner(result.message);
+            return null;
+          }
+
+          if (hasExplicitTokenProp || !session) {
+            setLocalAuthStatus((prev) => (prev === "checking" ? "unavailable" : prev));
+          }
+          setApiErrorBanner(result.message);
+          return null;
+        } finally {
+          if (inFlightLoadRef.current?.promise === promise) {
+            inFlightLoadRef.current = null;
+          }
+          setIsLoadingProfiles(false);
+        }
+      })();
+
+      inFlightLoadRef.current = { ownerKey, promise };
+      return promise;
+    },
+    [
+      apiBaseUrl,
+      effectiveGetAccessToken,
+      effectiveOnUnauthorizedRefresh,
+      handleAuthFailure,
+      hasExplicitTokenProp,
+      session,
+      t.sessionUnavailableBannerBody,
+    ]
+  );
+
+  const loadSavedProfilesFromApi = useCallback(async () => {
+    const ownerKey =
+      !hasExplicitTokenProp && session?.user?.id ? session.user.id : "prop-session";
+    await executeProfileListFetch(ownerKey);
+  }, [executeProfileListFetch, hasExplicitTokenProp, session]);
 
   useEffect(() => {
     let active = true;
-    async function hydrate() {
-      const token = getAccessToken ? await getAccessToken() : null;
-      if (!active) return;
-      const validToken = typeof token === "string" ? token.trim() : "";
-      if (!validToken) {
-        setAuthStatus("unauthenticated");
-        setIsLoadingProfiles(false);
-        return;
-      }
-      setAuthStatus("authenticated");
-      setIsLoadingProfiles(true);
-      try {
-        const response = await listProfiles({ getAccessToken, baseUrl: apiBaseUrl });
-        if (!active) return;
-        setProfileState((prev) => applyLoadedProfiles(prev, response.items));
-        setApiErrorBanner(null);
-      } catch (err) {
-        if (!active) return;
-        if (
-          err instanceof ApiClientError &&
-          (err.code === "AUTH_REQUIRED" || err.code === "UNAUTHORIZED")
-        ) {
-          setAuthStatus("unauthenticated");
-          setApiErrorBanner(err.message);
-        } else {
-          setApiErrorBanner(
-            err instanceof Error ? err.message : "Unable to load saved birth profiles."
-          );
-        }
-      } finally {
-        if (active) setIsLoadingProfiles(false);
-      }
+
+    if (hasExplicitTokenProp) {
+      loadedOwnerKeyRef.current = null;
+      void executeProfileListFetch("prop-session");
+      return () => {
+        active = false;
+      };
     }
-    void hydrate();
+
+    if (!session) {
+      return () => {
+        active = false;
+      };
+    }
+
+    const action = reconcileWorkspaceSessionTransition({
+      sessionStatus: session.status,
+      userId: session.user?.id ?? null,
+      loadedOwnerKey: loadedOwnerKeyRef.current,
+    });
+
+    if (action === "clear") {
+      loadedOwnerKeyRef.current = null;
+      void Promise.resolve().then(() => {
+        if (!active) return;
+        setProfileState((prev) =>
+          prev.savedProfiles.length > 0 ? applySessionCleared(prev) : prev
+        );
+        setConfirmDeleteId(null);
+        setProfileActionNotice(null);
+        setFormServerErrors([]);
+        setFormMode("closed");
+      });
+    } else if (action === "fetch") {
+      void executeProfileListFetch(session.user?.id ?? "session-user");
+    }
+
     return () => {
       active = false;
     };
-  }, [apiBaseUrl, getAccessToken]);
+  }, [executeProfileListFetch, hasExplicitTokenProp, session]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -395,6 +498,21 @@ export function UserChartWorkspace({
     setFormMode("edit");
   }
 
+  async function handleRetrySession() {
+    if (!hasExplicitTokenProp && session) {
+      setApiErrorBanner(null);
+      const nextSnapshot = await session.retrySession();
+      if (nextSnapshot.status === "authenticated" && nextSnapshot.user) {
+        await executeProfileListFetch(nextSnapshot.user.id);
+      }
+      return;
+    }
+    if (effectiveGetAccessToken) {
+      setLocalAuthStatus("checking");
+      await executeProfileListFetch("prop-session");
+    }
+  }
+
   async function handleSubmitProfileForm(payload: BirthProfileCreatePayload) {
     if (!isAuthenticated) return;
     setIsSubmittingForm(true);
@@ -402,17 +520,19 @@ export function UserChartWorkspace({
     setApiErrorBanner(null);
     setProfileActionNotice(null);
 
+    const clientConfig = {
+      getAccessToken: effectiveGetAccessToken,
+      onUnauthorizedRefresh: effectiveOnUnauthorizedRefresh,
+      baseUrl: apiBaseUrl,
+    };
+
     try {
       if (formMode === "edit" && activeProfile && !activeProfile.is_synthetic_sample) {
-        const updated = await updateProfile(
-          { getAccessToken, baseUrl: apiBaseUrl },
-          activeProfile.id,
-          payload
-        );
+        const updated = await updateProfile(clientConfig, activeProfile.id, payload);
         setProfileState((prev) => applyUpdatedProfile(prev, updated));
         setProfileActionNotice(t.profileUpdatedNotice);
       } else {
-        const created = await createProfile({ getAccessToken, baseUrl: apiBaseUrl }, payload);
+        const created = await createProfile(clientConfig, payload);
         setProfileState((prev) => applyCreatedProfile(prev, created));
         setProfileActionNotice(t.profileCreatedNotice);
       }
@@ -421,8 +541,17 @@ export function UserChartWorkspace({
       setHighlightedFactId(null);
     } catch (err) {
       if (err instanceof ApiClientError) {
-        if (err.code === "AUTH_REQUIRED" || err.code === "UNAUTHORIZED") {
-          setAuthStatus("unauthenticated");
+        const authClass = classifyWorkspaceAuthError({
+          errorCode: err.code,
+          liveSessionStatus:
+            !hasExplicitTokenProp && session ? session.getSnapshot().status : null,
+        });
+        if (authClass !== "other") {
+          const outcome = handleAuthFailure();
+          if (outcome === "unavailable") {
+            setFormServerErrors([t.sessionUnavailableBannerBody]);
+            return;
+          }
         }
         setFormServerErrors(
           err.validationMessages.length > 0 ? err.validationMessages : [err.message]
@@ -442,18 +571,38 @@ export function UserChartWorkspace({
     setProfileActionNotice(null);
 
     try {
-      await deleteProfile({ getAccessToken, baseUrl: apiBaseUrl }, profileId);
+      await deleteProfile(
+        {
+          getAccessToken: effectiveGetAccessToken,
+          onUnauthorizedRefresh: effectiveOnUnauthorizedRefresh,
+          baseUrl: apiBaseUrl,
+        },
+        profileId
+      );
       setProfileState((prev) => applyDeletedProfile(prev, profileId));
       setConfirmDeleteId(null);
       setProfileActionNotice(t.profileDeletedNotice);
       setHighlightedFactId(null);
     } catch (err) {
-      if (err instanceof ApiClientError && err.code === "UNAUTHORIZED") {
-        setAuthStatus("unauthenticated");
+      if (err instanceof ApiClientError) {
+        const authClass = classifyWorkspaceAuthError({
+          errorCode: err.code,
+          liveSessionStatus:
+            !hasExplicitTokenProp && session ? session.getSnapshot().status : null,
+        });
+        if (authClass !== "other") {
+          const outcome = handleAuthFailure();
+          setApiErrorBanner(
+            outcome === "unavailable" ? t.sessionUnavailableBannerBody : err.message
+          );
+        } else {
+          setApiErrorBanner(err.message);
+        }
+      } else {
+        setApiErrorBanner(
+          err instanceof Error ? err.message : "Unable to delete saved birth profile."
+        );
       }
-      setApiErrorBanner(
-        err instanceof Error ? err.message : "Unable to delete saved birth profile."
-      );
       setConfirmDeleteId(null);
     } finally {
       setIsDeletingProfile(false);
@@ -588,7 +737,7 @@ export function UserChartWorkspace({
                 </label>
                 <select
                   id="active-profile-select"
-                  value={profileState.activeProfileId ?? ""}
+                  value={displayedProfileState.activeProfileId ?? ""}
                   onChange={(e) => {
                     const nextId = e.target.value;
                     setProfileState((prev) => ({ ...prev, activeProfileId: nextId }));
@@ -777,6 +926,29 @@ export function UserChartWorkspace({
             <p className="mt-1 leading-relaxed text-[var(--kundali-ink)]">
               {t.authRequiredBannerBody}
             </p>
+          </div>
+        ) : null}
+
+        {authStatus === "unavailable" ? (
+          <div
+            role="alert"
+            className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-crimson-bg)] px-4 py-3 text-xs"
+          >
+            <div>
+              <p className="font-semibold text-[var(--kundali-crimson)]">
+                {t.sessionUnavailableBannerTitle}
+              </p>
+              <p className="mt-1 leading-relaxed text-[var(--kundali-ink)]">
+                {session?.error?.message ?? t.sessionUnavailableBannerBody}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleRetrySession()}
+              className="rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--kundali-crimson)]"
+            >
+              {t.retrySessionButton}
+            </button>
           </div>
         ) : null}
 
