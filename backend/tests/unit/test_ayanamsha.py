@@ -16,6 +16,7 @@ from swisseph_ffi import (  # type: ignore[import-untyped]
     SEFLG_JPLEPH,
     SEFLG_MOSEPH,
     SEFLG_NONUT,
+    SEFLG_RADIANS,
     SEFLG_SIDEREAL,
     SEFLG_SPEED,
     SEFLG_SWIEPH,
@@ -24,6 +25,7 @@ from swisseph_ffi import (  # type: ignore[import-untyped]
 
 import app.calc.ayanamsha as ayanamsha_mod
 from app.calc.ayanamsha import (
+    AYANAMSHA_AUXILIARY_FLAGS,
     AyanamshaMode,
     CalculationError,
     classify_ephemeris_flag,
@@ -128,27 +130,74 @@ def test_lahiri_1940_difference_at_jd() -> None:
 
 
 def test_classify_ephemeris_flag_auxiliary_and_failure_cases() -> None:
-    """Auxiliary flags are permitted while negative, missing, JPL, and conflicting flags fail."""
+    """Permits explicit auxiliary flags and rejects unknown, negative, JPL, or bad bits."""
+    planetary_aux = SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT
+
     assert (
         classify_ephemeris_flag(
-            SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT, subject="sun"
+            SEFLG_SWIEPH | planetary_aux,
+            subject="sun",
+            allowed_auxiliary_flags=planetary_aux,
         )
         == "swieph"
     )
     assert (
-        classify_ephemeris_flag(SEFLG_MOSEPH | SEFLG_SPEED | SEFLG_NONUT, subject="moon")
+        classify_ephemeris_flag(
+            SEFLG_MOSEPH | planetary_aux,
+            subject="moon",
+            allowed_auxiliary_flags=planetary_aux,
+        )
         == "moshier"
     )
+    assert (
+        classify_ephemeris_flag(
+            SEFLG_SWIEPH | SEFLG_NONUT,
+            subject="ayanamsha",
+            allowed_auxiliary_flags=AYANAMSHA_AUXILIARY_FLAGS,
+        )
+        == "swieph"
+    )
 
-    for bad_flag in (
-        -1,
-        -5,
-        SEFLG_SPEED | SEFLG_SIDEREAL,
-        SEFLG_JPLEPH | SEFLG_SPEED,
-        SEFLG_SWIEPH | SEFLG_MOSEPH | SEFLG_SPEED,
+    # Disallowed/unsupported bits fail closed even alongside valid source bits
+    unexpected_high_bit = 1 << 24
+    for bad_flag, aux_mask in (
+        (-1, planetary_aux),
+        (-5, planetary_aux),
+        (SEFLG_SPEED | SEFLG_SIDEREAL, planetary_aux),
+        (SEFLG_JPLEPH | planetary_aux, planetary_aux),
+        (SEFLG_SWIEPH | SEFLG_MOSEPH | planetary_aux, planetary_aux),
+        (SEFLG_SWIEPH | planetary_aux | unexpected_high_bit, planetary_aux),
+        (SEFLG_MOSEPH | planetary_aux | unexpected_high_bit, planetary_aux),
+        (SEFLG_SWIEPH | planetary_aux | SEFLG_RADIANS, planetary_aux),
+        (SEFLG_SWIEPH | SEFLG_SPEED, AYANAMSHA_AUXILIARY_FLAGS),
+        (SEFLG_SWIEPH | SEFLG_NONUT | unexpected_high_bit, AYANAMSHA_AUXILIARY_FLAGS),
     ):
         with pytest.raises(CalculationError):
-            classify_ephemeris_flag(bad_flag, subject="test_body")
+            classify_ephemeris_flag(
+                bad_flag,
+                subject="test_body",
+                allowed_auxiliary_flags=aux_mask,
+            )
+
+
+def test_ayanamsha_rejects_unexpected_return_bits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_ayanamsha_degrees fails closed if swe_get_ayanamsa_ex_ut returns extra bits."""
+
+    class _FakeSweExtraBit:
+        def swe_set_ephe_path(self, _path: bytes) -> None:
+            pass
+
+        def swe_set_sid_mode(self, _sid: int, _t0: float, _ayan_t0: float) -> None:
+            pass
+
+        def swe_get_ayanamsa_ex_ut(self, _jd: Any, _flag: int, aya_ptr: Any, _serr: Any) -> int:
+            aya_ptr._obj.value = 23.9
+            # Return SEFLG_SPEED (unrequested for ayanamsha) alongside SWIEPH | NONUT
+            return int(SEFLG_SWIEPH | SEFLG_NONUT | SEFLG_SPEED)
+
+    monkeypatch.setattr(ayanamsha_mod, "get_swe_engine", lambda: _FakeSweExtraBit())
+    with pytest.raises(CalculationError, match="Unexpected ephemeris return flags"):
+        get_ayanamsha_degrees(2451545.0)
 
 
 def test_ayanamsha_fails_closed_on_invalid_jd_and_wrapper_errors(

@@ -36,6 +36,7 @@ SWE_LOCK = threading.RLock()
 EPHE_DIR = Path(__file__).resolve().parent.parent.parent / "ephe"
 
 EPHE_SOURCE_MASK = SEFLG_JPLEPH | SEFLG_SWIEPH | SEFLG_MOSEPH
+AYANAMSHA_AUXILIARY_FLAGS = SEFLG_NONUT
 
 _SWE_INSTANCE: SwissEph | None = None
 _CONFIGURED_EPHE_PATH: str | None = None
@@ -80,17 +81,28 @@ def classify_ephemeris_flag(
     iflag: int,
     *,
     subject: str,
+    allowed_auxiliary_flags: int = 0,
     allow_moshier: bool = True,
 ) -> Literal["swieph", "moshier"]:
-    """Validate Swiss Ephemeris status/source flags independently from auxiliary flags.
+    """Validate Swiss Ephemeris status/source flags against explicitly permitted auxiliary bits.
 
     Checks ``iflag < 0`` BEFORE bitwise masking because C ``ERR (-1)`` has all bits set.
-    Auxiliary flags such as ``SEFLG_SPEED``, ``SEFLG_SIDEREAL``, and ``SEFLG_NONUT`` are
-    preserved by masking strictly against provenance bits.
+    Fails closed for negative status, missing/JPL/contradictory source flags, and any
+    bit outside ``EPHE_SOURCE_MASK | clean_auxiliary_flags``.
     """
     if iflag < 0:
         raise CalculationError(
             f"Swiss Ephemeris calculation failed for {subject} (status={iflag})."
+        )
+
+    if allowed_auxiliary_flags < 0:
+        raise CalculationError("Permitted auxiliary flag mask must be non-negative.")
+
+    clean_aux = allowed_auxiliary_flags & ~EPHE_SOURCE_MASK
+    unexpected_bits = iflag & ~(EPHE_SOURCE_MASK | clean_aux)
+    if unexpected_bits != 0:
+        raise CalculationError(
+            f"Unexpected ephemeris return flags for {subject} (mask=0x{unexpected_bits:x})."
         )
 
     source_bits = iflag & EPHE_SOURCE_MASK
@@ -130,7 +142,11 @@ def get_ayanamsha_degrees(jd: float, mode: AyanamshaMode = AyanamshaMode.LAHIRI)
         except Exception as exc:
             raise CalculationError("Swiss Ephemeris ayanamsha computation failed.") from exc
 
-    classify_ephemeris_flag(rc, subject="ayanamsha")
+    classify_ephemeris_flag(
+        rc,
+        subject="ayanamsha",
+        allowed_auxiliary_flags=AYANAMSHA_AUXILIARY_FLAGS,
+    )
 
     val = float(aya.value)
     if not math.isfinite(val):

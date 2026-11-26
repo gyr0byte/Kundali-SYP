@@ -13,8 +13,8 @@ import pytest
 
 import app.calc.ayanamsha as ayanamsha_mod
 import app.calc.facts as facts_mod
-from app.calc.ayanamsha import AyanamshaMode
-from app.calc.ephemeris import EphemerisResult, NodeType, PlanetPosition, calculate_positions
+from app.calc.ayanamsha import SWE_LOCK, AyanamshaMode
+from app.calc.ephemeris import EphemerisResult, NodeType, PlanetPosition
 from app.calc.facts import (
     ENGINE_VERSION,
     ChartFactLagna,
@@ -317,42 +317,72 @@ def test_atomic_lock_prevents_mid_chart_interleaving(
     sample_birth_input: TimeInput,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """compute_chart_facts holds SWE_LOCK continuously across Lagna and planetary computation."""
+    """compute_chart_facts holds outer SWE_LOCK continuously between Lagna and planets."""
     orig_compute_lagna = compute_lagna
-    orig_calc_pos = calculate_positions
-    trace: list[tuple[int, str]] = []
-    barrier = threading.Barrier(2)
+    lagna_finished = threading.Event()
+    allow_continue = threading.Event()
+    probe_finished = threading.Event()
 
-    def traced_lagna(*args: Any, **kwargs: Any) -> float:
-        trace.append((threading.get_ident(), "lagna"))
-        return orig_compute_lagna(*args, **kwargs)
+    acquired_by_competitor: list[bool] = []
+    worker_errors: list[BaseException] = []
+    completed_charts: list[str] = []
 
-    def traced_positions(*args: Any, **kwargs: Any) -> EphemerisResult:
-        trace.append((threading.get_ident(), "positions"))
-        return orig_calc_pos(*args, **kwargs)
+    def paused_compute_lagna(*args: Any, **kwargs: Any) -> float:
+        result = orig_compute_lagna(*args, **kwargs)
+        lagna_finished.set()
+        if not allow_continue.wait(timeout=5.0):
+            raise TimeoutError("Timed out waiting for continuation event after Lagna.")
+        return result
 
-    monkeypatch.setattr(facts_mod, "compute_lagna", traced_lagna)
-    monkeypatch.setattr(facts_mod, "calculate_positions", traced_positions)
+    monkeypatch.setattr(facts_mod, "compute_lagna", paused_compute_lagna)
 
-    def worker(idx: int) -> None:
-        cfg = ChartSettings(ayanamsha=AyanamshaMode.LAHIRI if idx == 0 else AyanamshaMode.RAMAN)
-        barrier.wait(timeout=5.0)
-        for _ in range(5):
-            compute_chart_facts(sample_birth_input, cfg, chart_id=f"c_atom_{idx}")
+    def _chart_worker() -> None:
+        try:
+            doc = compute_chart_facts(
+                sample_birth_input,
+                ChartSettings(ayanamsha=AyanamshaMode.LAHIRI),
+                chart_id="c_lock_outer_001",
+            )
+            completed_charts.append(doc.chart_id)
+        except BaseException as exc:  # noqa: BLE001 - propagate thread exception to main thread
+            worker_errors.append(exc)
+        finally:
+            lagna_finished.set()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        futs = [executor.submit(worker, 0), executor.submit(worker, 1)]
-        for f in futs:
-            f.result()
+    def _probe_worker() -> None:
+        try:
+            acquired = SWE_LOCK.acquire(blocking=False)
+            acquired_by_competitor.append(acquired)
+            if acquired:
+                SWE_LOCK.release()
+        except BaseException as exc:  # noqa: BLE001 - propagate thread exception to main thread
+            worker_errors.append(exc)
+        finally:
+            probe_finished.set()
 
-    assert len(trace) == 20
-    # Every chart's (lagna, positions) pair must come from the same thread contiguously
-    for pair_idx in range(0, len(trace), 2):
-        tid_1, step_1 = trace[pair_idx]
-        tid_2, step_2 = trace[pair_idx + 1]
-        assert step_1 == "lagna"
-        assert step_2 == "positions"
-        assert tid_1 == tid_2
+    t1 = threading.Thread(target=_chart_worker, name="chart-calc-worker")
+    t2 = threading.Thread(target=_probe_worker, name="lock-probe-worker")
+
+    try:
+        t1.start()
+        assert lagna_finished.wait(timeout=5.0), "First thread never finished Lagna."
+
+        # Inner SWE_LOCK in compute_lagna() has exited; only outer compute_chart_facts()
+        # SWE_LOCK holds the lock at this synchronization point.
+        t2.start()
+        assert probe_finished.wait(timeout=5.0), "Competing thread lock probe timed out."
+    finally:
+        allow_continue.set()
+        t1.join(timeout=5.0)
+        t2.join(timeout=5.0)
+
+    assert not t1.is_alive()
+    assert not t2.is_alive()
+    if worker_errors:
+        raise worker_errors[0]
+
+    assert acquired_by_competitor == [False]
+    assert completed_charts == ["c_lock_outer_001"]
 
 
 def test_default_chart_settings() -> None:

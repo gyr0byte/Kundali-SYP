@@ -12,9 +12,11 @@ from swisseph_ffi import (  # type: ignore[import-untyped]
     SEFLG_JPLEPH,
     SEFLG_MOSEPH,
     SEFLG_NONUT,
+    SEFLG_RADIANS,
     SEFLG_SIDEREAL,
     SEFLG_SPEED,
     SEFLG_SWIEPH,
+    SEFLG_TRUEPOS,
 )
 
 import app.calc.ayanamsha as ayanamsha_mod
@@ -108,16 +110,42 @@ def test_ephemeris_mixed_provenance_and_auxiliary_flags_via_mock(
     assert res.ephemeris_source == "mixed"
 
 
+def test_ephemeris_swieph_and_moshier_auxiliary_flags_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accepts full permitted auxiliary flags (SPEED, SIDEREAL, NONUT) for both sources."""
+
+    def _run_with_source_bit(source_flag: int) -> str:
+        class _FakeSwe:
+            def swe_set_sid_mode(self, _sid: int, _t0: float, _ayan_t0: float) -> None:
+                pass
+
+            def swe_calc_ut(self, _jd: Any, _pid: int, _flags: int, xx: Any, _serr: Any) -> int:
+                xx[0] = 45.0
+                xx[3] = 0.5
+                return int(source_flag | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT)
+
+        monkeypatch.setattr(ephemeris_mod, "get_swe_engine", lambda: _FakeSwe())
+        return calculate_positions(2451545.0).ephemeris_source
+
+    assert _run_with_source_bit(SEFLG_SWIEPH) == "swieph"
+    assert _run_with_source_bit(SEFLG_MOSEPH) == "moshier"
+
+
 @pytest.mark.parametrize(
     ("bad_iflag", "lon_val", "speed_val"),
     [
         (-1, 10.0, 0.5),
         (-42, 10.0, 0.5),
-        (SEFLG_SPEED | SEFLG_SIDEREAL, 10.0, 0.5),
-        (SEFLG_JPLEPH | SEFLG_SPEED | SEFLG_SIDEREAL, 10.0, 0.5),
-        (SEFLG_SWIEPH | SEFLG_MOSEPH | SEFLG_SPEED, 10.0, 0.5),
-        (SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL, float("nan"), 0.5),
-        (SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL, 10.0, float("inf")),
+        (SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT, 10.0, 0.5),
+        (SEFLG_JPLEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT, 10.0, 0.5),
+        (SEFLG_SWIEPH | SEFLG_MOSEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT, 10.0, 0.5),
+        (SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT | (1 << 24), 10.0, 0.5),
+        (SEFLG_MOSEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT | (1 << 25), 10.0, 0.5),
+        (SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT | SEFLG_RADIANS, 10.0, 0.5),
+        (SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT | SEFLG_TRUEPOS, 10.0, 0.5),
+        (SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT, float("nan"), 0.5),
+        (SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT, 10.0, float("inf")),
     ],
 )
 def test_ephemeris_fails_closed_on_bad_flags_and_nonfinite_outputs(
@@ -126,7 +154,7 @@ def test_ephemeris_fails_closed_on_bad_flags_and_nonfinite_outputs(
     lon_val: float,
     speed_val: float,
 ) -> None:
-    """Negative status (-1), missing/JPL/conflicting bits, and NaN/Inf fail closed."""
+    """Negative status, missing/JPL/contradictory bits, unknown high bits, and NaN fail closed."""
 
     class _FakeSweBad:
         def swe_set_sid_mode(self, _sid: int, _t0: float, _ayan_t0: float) -> None:

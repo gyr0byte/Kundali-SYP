@@ -22,6 +22,7 @@ from swisseph_ffi import (  # type: ignore[import-untyped]
     SE_SUN,
     SE_TRUE_NODE,
     SE_VENUS,
+    SEFLG_NONUT,
     SEFLG_SIDEREAL,
     SEFLG_SPEED,
     SEFLG_SWIEPH,
@@ -39,6 +40,9 @@ from app.calc.ayanamsha import (
 from app.calc.houses import normalize_longitude
 
 EphemerisSource = Literal["swieph", "moshier", "mixed"]
+
+# Auxiliary flags returned by Swiss Ephemeris for sidereal speed calculations.
+PLANETARY_AUXILIARY_FLAGS: int = SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT
 
 
 class NodeType(StrEnum):
@@ -109,7 +113,11 @@ def _calc_single_body(
             f"Swiss Ephemeris calculation raised an error for {body_name}."
         ) from exc
 
-    source = classify_ephemeris_flag(iflag, subject=body_name)
+    source = classify_ephemeris_flag(
+        iflag,
+        subject=body_name,
+        allowed_auxiliary_flags=PLANETARY_AUXILIARY_FLAGS,
+    )
 
     raw_lon = float(xx[0])
     speed = float(xx[3])
