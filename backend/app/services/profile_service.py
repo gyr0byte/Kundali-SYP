@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -35,6 +37,58 @@ class ProfileValidationError(ValueError):
 
 class ProfileStorageError(RuntimeError):
     """Raised when encrypted birth profile fields cannot be protected or decoded."""
+
+
+@dataclass(frozen=True)
+class ProfileCalcInputs:
+    """In-memory decrypted birth fields needed strictly for deterministic calculation."""
+
+    profile_id: uuid.UUID
+    updated_at: datetime
+    input_calendar: InputCalendar
+    time_certainty: TimeCertainty
+    date_ad: str | None
+    time_local: str | None
+    latitude: float
+    longitude: float
+    timezone: str
+
+
+def decrypt_profile_calc_inputs(
+    profile: BirthProfile,
+    *,
+    owner_id: uuid.UUID,
+    settings: Settings,
+) -> ProfileCalcInputs:
+    """Decrypt strictly calculation-required profile fields for the verified owner.
+
+    Intentionally skips non-calculation identity fields (``label_enc``,
+    ``entered_date_enc``, ``place_name_enc``) to minimize plaintext exposure in memory.
+    """
+    if str(profile.owner_id) != str(owner_id):
+        raise PermissionError("Profile ownership mismatch")
+
+    key = settings.ENCRYPTION_KEY
+    try:
+        date_ad = decrypt_optional_text(profile.date_ad_enc, key)
+        time_local = decrypt_optional_text(profile.time_local_enc, key)
+        latitude = decrypt_float(profile.latitude_enc, key)
+        longitude = decrypt_float(profile.longitude_enc, key)
+        timezone_name = decrypt_text(profile.timezone_enc, key)
+    except (DecryptionError, ValueError):
+        raise ProfileStorageError("Unable to decrypt stored birth profile") from None
+
+    return ProfileCalcInputs(
+        profile_id=profile.id,
+        updated_at=profile.updated_at,
+        input_calendar=profile.input_calendar,
+        time_certainty=profile.time_certainty,
+        date_ad=date_ad,
+        time_local=time_local,
+        latitude=latitude,
+        longitude=longitude,
+        timezone=timezone_name,
+    )
 
 
 def _compute_bs_status(input_calendar: InputCalendar, date_ad: str | None) -> BsConversionStatus:

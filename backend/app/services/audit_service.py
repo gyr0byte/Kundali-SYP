@@ -32,6 +32,13 @@ FORBIDDEN_METADATA_KEYS: frozenset[str] = frozenset(
         "latitude",
         "longitude",
         "timezone",
+        "julian_day",
+        "datetime_utc",
+        "utc_offset",
+        "time_utc",
+        "lagna_longitude",
+        "planet_positions",
+        "chart_facts",
         "profile_label",
         "encryption_key",
         "ciphertext",
@@ -42,7 +49,7 @@ FORBIDDEN_METADATA_KEYS: frozenset[str] = frozenset(
 
 # Exact token segments blocked in key names (split on non-alphanumeric separators)
 FORBIDDEN_EXACT_TOKENS: frozenset[str] = frozenset(
-    {"lat", "lon", "lng", "tz", "label", "email", "phone", "ssn"}
+    {"lat", "lon", "lng", "tz", "jd", "label", "email", "phone", "ssn"}
 )
 
 # Explicit structural allowlist for profile audit events (defense-in-depth over denylist)

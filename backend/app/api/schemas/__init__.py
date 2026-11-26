@@ -11,6 +11,11 @@ from app.api.schemas.auth import (
     ResetPasswordRequest,
     TokenResponse,
 )
+from app.api.schemas.chart import (
+    ChartCalculationRequest,
+    ChartCalculationResponse,
+    ChartConflictErrorResponse,
+)
 from app.api.schemas.profile import (
     BirthProfileCreate,
     BirthProfileListResponse,
@@ -36,6 +41,9 @@ __all__ = [
     "BirthProfileResponse",
     "BirthProfileUpdate",
     "ChangePasswordRequest",
+    "ChartCalculationRequest",
+    "ChartCalculationResponse",
+    "ChartConflictErrorResponse",
     "ErrorResponse",
     "ForgotPasswordRequest",
     "LoginRequest",

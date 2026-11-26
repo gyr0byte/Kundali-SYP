@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, Response
 from app.api.v1.admin import router as admin_router
 from app.api.v1.astrologer import router as astrologer_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.charts import router as charts_router
 from app.api.v1.profiles import router as profiles_router
 from app.core.config import Settings, get_settings
 from app.core.security import validate_fernet_key
@@ -59,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_v1.include_router(admin_router)
     api_v1.include_router(astrologer_router)
     api_v1.include_router(profiles_router)
+    api_v1.include_router(charts_router)
     app.include_router(api_v1)
 
     @app.exception_handler(RequestValidationError)

@@ -1,0 +1,135 @@
+"""Pydantic v2 request and response schemas for deterministic chart calculation."""
+
+from __future__ import annotations
+
+import datetime
+import math
+import uuid
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.calc.ayanamsha import AyanamshaMode
+from app.calc.ephemeris import NodeType
+from app.calc.facts import (
+    CALCULATION_PRESETS,
+    SUPPORTED_YEAR_DAYS,
+    ChartFacts,
+    ChartSettings,
+)
+from app.db.models.profile import InputCalendar, TimeCertainty
+
+ChartPreset = Literal["hamro_patro_compat"]
+ChartConflictErrorCode = Literal[
+    "AWAITING_BS_CONVERSION",
+    "UNKNOWN_TIME_UNSUPPORTED",
+    "INCOMPLETE_BIRTH_DATA",
+]
+
+
+class ChartCalculationRequest(BaseModel):
+    """Calculation settings supplied by the client for an owned birth profile.
+
+    Birth date, time, coordinates, and timezone are NEVER accepted from the client;
+    they are decrypted strictly from the server-side owned BirthProfile record.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ayanamsha: AyanamshaMode | None = None
+    house_system: Literal["whole_sign"] | None = None
+    node_type: NodeType | None = None
+    year_days: float | None = Field(
+        default=None,
+        description="Supported Dasha year length: 360.0, 365.2425, or 365.25",
+    )
+    preset: ChartPreset | None = None
+
+    @field_validator("year_days", mode="before")
+    @classmethod
+    def check_year_days_supported(cls, value: object) -> float | None:
+        """Normalize supported integer/float year_days values and reject non-numeric inputs."""
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("year_days must be one of 360.0, 365.2425, 365.25")
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric not in SUPPORTED_YEAR_DAYS:
+            raise ValueError("year_days must be one of 360.0, 365.2425, 365.25")
+        return numeric
+
+    @field_validator("preset", mode="before")
+    @classmethod
+    def check_preset_known(cls, value: object) -> str | None:
+        """Reject non-string or unknown preset identifiers before Literal validation."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Unknown calculation preset")
+        cleaned = value.strip()
+        if cleaned not in CALCULATION_PRESETS:
+            available = ", ".join(sorted(CALCULATION_PRESETS))
+            raise ValueError(f"Unknown calculation preset; available: {available}")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_nullability_and_preset_consistency(self) -> ChartCalculationRequest:
+        """Reject explicit nulls on configuration fields and contradictory preset overrides."""
+        for field_name in ("ayanamsha", "house_system", "node_type", "year_days"):
+            if field_name in self.model_fields_set and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null")
+
+        if self.preset is not None:
+            preset_settings = ChartSettings.from_preset(self.preset)
+            for field_name in ("ayanamsha", "house_system", "node_type"):
+                if field_name in self.model_fields_set and getattr(self, field_name) != getattr(
+                    preset_settings, field_name
+                ):
+                    raise ValueError(f"Setting {field_name} contradicts preset {self.preset!r}")
+
+        return self
+
+    def to_chart_settings(self) -> ChartSettings:
+        """Resolve client calculation settings into an immutable engine ChartSettings model."""
+        if self.preset is not None:
+            preset_settings = ChartSettings.from_preset(self.preset)
+            ayanamsha = self.ayanamsha if self.ayanamsha is not None else preset_settings.ayanamsha
+            house_system = (
+                self.house_system if self.house_system is not None else preset_settings.house_system
+            )
+            node_type = self.node_type if self.node_type is not None else preset_settings.node_type
+            year_days = self.year_days if self.year_days is not None else preset_settings.year_days
+            return ChartSettings(
+                ayanamsha=ayanamsha,
+                house_system=house_system,
+                node_type=node_type,
+                year_days=year_days,
+                preset=self.preset,
+            )
+
+        return ChartSettings(
+            ayanamsha=self.ayanamsha if self.ayanamsha is not None else AyanamshaMode.LAHIRI,
+            house_system=self.house_system if self.house_system is not None else "whole_sign",
+            node_type=self.node_type if self.node_type is not None else NodeType.MEAN,
+            year_days=self.year_days if self.year_days is not None else 365.25,
+            preset=None,
+        )
+
+
+class ChartCalculationResponse(BaseModel):
+    """Response envelope pairing computed ChartFacts with source profile certainty context."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: uuid.UUID
+    profile_updated_at: datetime.datetime
+    input_calendar: InputCalendar
+    time_certainty: TimeCertainty
+    chart: ChartFacts
+
+
+class ChartConflictErrorResponse(BaseModel):
+    """Structured HTTP 409 error response for blocked or incomplete profile states."""
+
+    detail: str
+    code: ChartConflictErrorCode

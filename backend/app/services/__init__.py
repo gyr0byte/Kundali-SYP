@@ -18,10 +18,19 @@ from app.services.auth_service import (
     revoke_all_tokens,
     revoke_token,
 )
+from app.services.chart_service import (
+    ChartCalculationFailureError,
+    ChartProfileConflictError,
+    ChartTimeInputError,
+    build_deterministic_chart_id,
+    calculate_profile_chart,
+)
 from app.services.profile_service import (
+    ProfileCalcInputs,
     ProfileStorageError,
     ProfileValidationError,
     create_profile,
+    decrypt_profile_calc_inputs,
     delete_profile,
     list_profiles,
     serialize_profile,
@@ -30,15 +39,22 @@ from app.services.profile_service import (
 from app.services.user_service import deactivate_user, list_users, reactivate_user
 
 __all__ = [
+    "ChartCalculationFailureError",
+    "ChartProfileConflictError",
+    "ChartTimeInputError",
+    "ProfileCalcInputs",
     "ProfileStorageError",
     "ProfileValidationError",
     "apply_for_astrologer",
     "approve_astrologer",
     "authenticate_user",
+    "build_deterministic_chart_id",
+    "calculate_profile_chart",
     "change_password",
     "create_profile",
     "create_token_pair",
     "deactivate_user",
+    "decrypt_profile_calc_inputs",
     "delete_profile",
     "list_astrologers",
     "list_profiles",
