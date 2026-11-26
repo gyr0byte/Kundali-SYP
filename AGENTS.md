@@ -31,3 +31,10 @@
 - Python: formatted with ruff, type-checked with mypy, tested with pytest.
 - TypeScript: Next.js App Router, strict mode, ESLint enabled.
 - All stubs should remain stubs until implementation is planned.
+
+## Frontend UI Standards
+- Whenever working on frontend UI, design, layout, styling, localization, or browser verification, read:
+  - `frontend/DESIGN.md` (canonical Observatory Timetable visual spec, skill hierarchy, and verification standard)
+  - `PRODUCT.md` and `docs/Kundali_Project_Plan.md` (authoritative product boundaries and role scope)
+  - `.impeccable/surfaces/` (relevant surface briefs, such as `.impeccable/surfaces/frontend-src-app-user-page-tsx.md`)
+  - `frontend/AGENTS.md` and the installed Next.js 16 documentation under `frontend/node_modules/next/dist/docs/` before modifying App Router code.
