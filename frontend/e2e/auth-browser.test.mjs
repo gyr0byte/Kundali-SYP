@@ -47,6 +47,7 @@ async function waitForServerReady(baseUrl, timeoutMs = 45_000) {
 async function assertResponsiveNoOverflow(page, routeLabel, viewports) {
   for (const vp of viewports) {
     await page.setViewportSize({ width: vp.width, height: vp.height });
+    await page.evaluate(() => document.fonts.ready);
     const metrics = await page.evaluate(() => {
       const controls = [...document.querySelectorAll("a, button, input, select, textarea")].filter(
         (el) => !el.hasAttribute("data-nextjs-dev-tools-button") && !el.closest("nextjs-portal")
@@ -93,12 +94,15 @@ async function assertResponsiveNoOverflow(page, routeLabel, viewports) {
         scrollWidth: document.documentElement.scrollWidth,
         clipped,
         overlaps,
+        overflowing: [...document.querySelectorAll("body *")].filter((element) =>
+          element.getBoundingClientRect().right > window.innerWidth + 1
+        ).slice(0, 12).map((element) => [element.tagName, element.className, element.getBoundingClientRect().right]),
       };
     });
 
     assert.ok(
       metrics.scrollWidth <= metrics.innerWidth,
-      `${routeLabel} overflow at ${vp.width}x${vp.height}: scrollWidth=${metrics.scrollWidth} > innerWidth=${metrics.innerWidth}. Clipped controls: ${JSON.stringify(metrics.clipped)}`
+      `${routeLabel} overflow at ${vp.width}x${vp.height}: scrollWidth=${metrics.scrollWidth} > innerWidth=${metrics.innerWidth}. Overflowing elements: ${JSON.stringify(metrics.overflowing)}`
     );
     assert.equal(
       metrics.clipped.length,
@@ -166,6 +170,18 @@ async function verifyChartWorkspace(browser) {
         },
       },
     });
+  const captureWorkspaceView = async (view) => {
+    if (!screenshots) return;
+    for (const [locale, language] of [["en", "EN"], ["ne", "नेपाली"]]) {
+      await page.getByRole("button", { name: language, exact: true }).click();
+      for (const width of [1440, 375]) {
+        await page.setViewportSize({ width, height: width === 1440 ? 900 : 812 });
+        await screenshot(`${view}-${locale}-${width}.png`);
+      }
+    }
+    await page.getByRole("button", { name: "EN", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+  };
   respondToChart = routeSuccess;
   try {
     await browserContext.route("**/api/auth/refresh", (route) => {
@@ -205,6 +221,13 @@ async function verifyChartWorkspace(browser) {
     const calc = () => page.getByRole("button", { name: en.calculateChart, exact: true });
     const status = (message) => page.getByText(message, { exact: true }).waitFor({ state: "visible" });
     const noChart = () => chart.waitFor({ state: "hidden" });
+    const openWorkspace = async (name) => {
+      const toggle = page.getByRole("button", { name: en.navigationToggle });
+      if (await toggle.isVisible() && await toggle.getAttribute("aria-expanded") === "false") {
+        await toggle.click();
+      }
+      await page.getByRole("button", { name, exact: true }).click();
+    };
     const settings = async () => {
       await page.getByRole("button", { name: en.settingsButton }).click();
       const dialog = page.getByRole("dialog", { name: en.settingsTitle });
@@ -214,6 +237,28 @@ async function verifyChartWorkspace(browser) {
     await calc().waitFor();
     assert.equal(requests.length, 0);
     await noChart();
+    const accountTrigger = page.locator("header summary").filter({ hasText: en.accountMenu });
+    await accountTrigger.click();
+    await page.getByRole("button", { name: en.signOutAllButton, exact: true }).click();
+    const logoutConfirmation = page.getByRole("alertdialog", { name: en.logoutConfirmTitle });
+    await logoutConfirmation.waitFor();
+    await page.keyboard.press("Escape");
+    await logoutConfirmation.waitFor({ state: "hidden" });
+    assert.equal(await accountTrigger.evaluate((element) => element === document.activeElement), true);
+
+    await openWorkspace(en.navPrivacy);
+    await page.getByRole("heading", { name: en.privacyHeading }).waitFor();
+    await captureWorkspaceView("settings");
+    const calendars = page.getByRole("group", { name: en.displayCalendarLabel });
+    await calendars.getByRole("button", { name: en.displayBs, exact: true }).click();
+    await status(en.bsDisplayPending);
+    await calendars.getByRole("button", { name: en.displayAd, exact: true }).click();
+    await openWorkspace(en.navProfiles);
+    await captureWorkspaceView("profiles");
+    await page.getByRole("button", { name: en.newProfileButton }).click();
+    await page.getByRole("heading", { name: en.formTitle }).waitFor();
+    await page.getByRole("button", { name: en.formCancel, exact: true }).click();
+    await openWorkspace(en.navWorkspace);
 
     let release;
     let finished;
@@ -237,7 +282,27 @@ async function verifyChartWorkspace(browser) {
     await calc().click();
     await arrived;
     await status(en.calculatingChart);
-    await screenshot("chart-loading-en.png");
+    for (const id of ["chart-skeleton", "placement-skeleton"]) {
+      const skeleton = page.getByTestId(id);
+      await skeleton.waitFor();
+      assert.equal(await skeleton.getAttribute("aria-hidden"), "true");
+      assert.equal(await skeleton.evaluate((element) => getComputedStyle(element).animationName), "none");
+    }
+    assert.equal(await page.getByRole("row").count(), 0);
+    if (screenshots) {
+      for (const [locale, language, message] of [
+        ["en", "EN", en.calculatingChart], ["ne", "नेपाली", ne.calculatingChart],
+      ]) {
+        await page.getByRole("button", { name: language, exact: true }).click();
+        await status(message);
+        for (const width of [1440, 375]) {
+          await page.setViewportSize({ width, height: width === 1440 ? 900 : 812 });
+          await screenshot(`chart-loading-${locale}-${width}.png`);
+        }
+      }
+      await page.getByRole("button", { name: "EN", exact: true }).click();
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
     assert.equal(await calc().getAttribute("aria-disabled"), "true");
     await calc().evaluate((button) => button.click());
     await profileSelect.selectOption(second.id);
@@ -256,14 +321,28 @@ async function verifyChartWorkspace(browser) {
     };
     await calc().click();
     await status(en.chartCalculated);
+    assert.equal(await page.getByTestId("chart-skeleton").count(), 0);
+    assert.equal(await page.getByTestId("placement-skeleton").count(), 0);
     assert.equal(refreshes, 2);
     assert.notEqual(requests.at(-1).auth, requests.at(-2).auth);
     assert.deepEqual(requests.at(-1).body, {
       ayanamsha: "lahiri", node_type: "mean", house_system: "whole_sign", year_days: 365.25,
     });
     await status(en.provenanceMixed);
+    assert.equal(await page.getByText(/mock-chart-/).isVisible(), false);
+    const details = page.locator("main summary").filter({ hasText: en.calculateDetails });
+    await details.click();
+    assert.equal(await page.getByText(/mock-chart-/).isVisible(), true);
+    await details.click();
+    assert.equal(await page.getByText(/Backend Stub|Allowlisted Payload/).count(), 0);
     assert.match(await chart.getAttribute("aria-label"), /North Indian/);
     const sun = page.getByRole("row").filter({ hasText: "f_sun" });
+    const natalPanel = await page.getByRole("region", { name: en.chartSectionTitle }).boundingBox();
+    const placementsPanel = await page.getByRole("region", { name: en.tableSectionTitle }).boundingBox();
+    if (page.viewportSize().width >= 1280) {
+      assert.equal(natalPanel.y, placementsPanel.y);
+      assert.ok(natalPanel.x + natalPanel.width <= placementsPanel.x);
+    }
     assert.match(await sun.innerText(), /Taurus/);
     await sun.focus();
     await page.keyboard.press("Enter");
@@ -324,15 +403,19 @@ async function verifyChartWorkspace(browser) {
     await calc().click();
     await status(en.provenanceMoshier);
     assert.deepEqual(requests.at(-1).body, { preset: "hamro_patro_compat", year_days: 365.25 });
+    await openWorkspace(en.navProfiles);
     await page.getByRole("button", { name: en.editProfileButton }).click();
     await page.getByRole("button", { name: en.editFormSubmit }).click();
     await status(en.profileUpdatedNotice);
+    await openWorkspace(en.navWorkspace);
     await noChart();
     await calc().click();
     await status(en.chartCalculated);
+    await openWorkspace(en.navProfiles);
     await page.getByRole("button", { name: en.deleteProfileButton }).click();
     await page.getByRole("button", { name: en.deleteConfirmButton, exact: true }).click();
     await status(en.profileDeletedNotice);
+    await openWorkspace(en.navWorkspace);
     await noChart();
 
     const beforeBlocked = requests.length;
@@ -409,6 +492,10 @@ async function runTests() {
     await waitForServerReady(TEST_ORIGIN);
 
     browser = await chromium.launch({ headless: true });
+    if (process.argv.includes("--workspace-only")) {
+      await verifyChartWorkspace(browser);
+      return;
+    }
     const viewports = [
       { width: 1280, height: 800 },
       { width: 768, height: 1024 },
@@ -547,16 +634,16 @@ async function runTests() {
       });
       await assertResponsiveNoOverflow(page, "/user(unauthenticated)", viewports);
 
-      assert.equal(await page.getByRole("link", { name: "Sign in" }).count(), 2);
-      assert.equal(await page.getByRole("link", { name: "Create account" }).count(), 2);
+      assert.equal(await page.getByRole("link", { name: "Sign in" }).count(), 1);
+      assert.equal(await page.getByRole("link", { name: "Create account" }).count(), 1);
       assert.equal(
-        await page.getByRole("button", { name: "Save Profile", exact: true }).isDisabled(),
-        true
+        await page.getByRole("button", { name: "Save Profile", exact: true }).count(),
+        0
       );
 
       // Preview Synthetic Sample works cleanly with zero storage usage
-      await page.getByRole("button", { name: /Preview Synthetic Sample/ }).first().click();
-      await page.getByText("Synthetic Engine Snapshot").waitFor({ state: "visible" });
+      await page.getByRole("button", { name: "Explore a sample chart", exact: true }).click();
+      await page.getByText("Synthetic chart preview").waitFor({ state: "visible" });
       await page.getByRole("button", { name: "South Indian" }).click();
       await assertResponsiveNoOverflow(page, "/user(synthetic)", viewports);
 
@@ -764,23 +851,43 @@ async function runTests() {
 
       delayedLoginResolver();
       await page.waitForURL(`${TEST_ORIGIN}/user`);
+      const account = () => page.locator("header summary").filter({ hasText: "Account" });
+      await account().click();
       await page.getByText("asha@example.com").waitFor({ state: "visible" });
       await page.getByText(/Role:\s*user/i).waitFor({ state: "visible" });
+      await page.keyboard.press("Escape");
 
       // Responsive authenticated header on /user (no overflow)
       await assertResponsiveNoOverflow(page, "/user(authenticated)", viewports);
+      if (process.env.KUNDALI_CHART_SCREENSHOTS) {
+        const folder = process.env.KUNDALI_CHART_SCREENSHOTS;
+        await mkdir(folder, { recursive: true });
+        for (const [locale, language, emptyText] of [
+          ["en", "EN", "Start with a birth profile"], ["ne", "नेपाली", "जन्म प्रोफाइलबाट सुरु गर्नुहोस्"],
+        ]) {
+          await page.getByRole("button", { name: language, exact: true }).click();
+          await page.getByRole("heading", { name: emptyText }).waitFor();
+          for (const width of [1440, 375]) {
+            await page.setViewportSize({ width, height: 900 });
+            await page.screenshot({ path: path.join(folder, `empty-${locale}-${width}.png`), fullPage: true, style: "nextjs-portal { display: none }" });
+          }
+        }
+        await page.getByRole("button", { name: "EN", exact: true }).click();
+      }
 
       // Visiting /login while authenticated auto-redirects to /user
       await page.goto(`${TEST_ORIGIN}/login`, { waitUntil: "domcontentloaded" });
       await page.waitForURL(`${TEST_ORIGIN}/user`);
 
       // Sign out all devices dialog + failed 503 preserves session honestly
+      await account().click();
       await page.getByRole("button", { name: "Sign out all devices" }).click();
       const dialog = page.getByRole("alertdialog");
       await dialog.waitFor({ state: "visible" });
       assert.match(await dialog.innerText(), /15 minutes/);
       await dialog.getByRole("button", { name: "Revoke all sessions" }).click();
       await page.getByText(/Global sign-out did not complete/).waitFor({ state: "visible" });
+      await account().click();
       assert.equal(
         await page.getByRole("button", { name: "Sign out", exact: true }).isVisible(),
         true
@@ -789,7 +896,7 @@ async function runTests() {
       // Single-session Sign out with unconfirmed backend revocation displays honest amber notice
       await page.getByRole("button", { name: "Sign out", exact: true }).click();
       await page
-        .getByText(/backend refresh-token revocation could not be confirmed/i)
+        .getByText(/could not confirm that the session ended/i)
         .waitFor({ state: "visible" });
       assert.equal(await page.getByRole("link", { name: "Sign in" }).count() >= 1, true);
 
@@ -804,6 +911,7 @@ async function runTests() {
       await retryBtn.waitFor({ state: "visible" });
       await retryBtn.click();
       await page.waitForURL(`${TEST_ORIGIN}/user`);
+      await account().click();
       await page.getByText("asha@example.com").waitFor({ state: "visible" });
 
       await context.close();

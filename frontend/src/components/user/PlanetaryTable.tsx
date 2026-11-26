@@ -28,6 +28,20 @@ interface PlanetaryTableProps {
   };
 }
 
+export function PlanetaryTableSkeleton() {
+  return (
+    <div aria-hidden="true" data-testid="placement-skeleton">
+      {Array.from({ length: 10 }, (_, index) => (
+        <div key={index} className="flex items-center gap-4 border-b border-[var(--kundali-border-subtle)] py-3">
+          <span className="h-2.5 w-1/4 rounded-sm bg-[var(--kundali-strip)]" />
+          <span className="h-2.5 w-1/5 rounded-sm bg-[var(--kundali-strip)]" />
+          <span className="ml-auto h-2.5 w-1/6 rounded-sm bg-[var(--kundali-strip)]" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function PlanetaryTable({
   chart,
   locale,

@@ -136,7 +136,7 @@ const formLabels = {
 };
 
 describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
-  it("renders unauthenticated state cleanly with disabled save and no prefilled Kathmandu values", () => {
+  it("renders the signed-out workspace with auth and sample entry points", () => {
     const html = renderToStaticMarkup(
       React.createElement(UserChartWorkspace, {
         messagesByLocale: { en: enMessages.userWorkspace, ne: neMessages.userWorkspace },
@@ -146,8 +146,8 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
     assert.match(html, /Authentication Required to Manage Saved Profiles/);
     assert.match(html, /href="\/login"/);
     assert.match(html, /href="\/register"/);
-    assert.match(html, /Preview Synthetic Sample \(London, 2015\)/);
-    assert.match(html, /type="submit" disabled=""[^>]*>Save Profile/);
+    assert.match(html, /Explore a sample chart/);
+    assert.doesNotMatch(html, />Save Profile</);
     assert.equal(html.includes('value="Kathmandu, Nepal"'), false);
     assert.equal(html.includes('value="27.7172"'), false);
     assert.equal(html.includes('value="85.3240"'), false);
@@ -315,7 +315,7 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
     assert.match(authedHtml, /Role:.*user/);
     assert.match(authedHtml, />Sign out</);
     assert.match(authedHtml, />Sign out all devices</);
-    assert.match(authedHtml, /type="submit"[^>]*>Save Profile/);
+    assert.match(authedHtml, /Start with a birth profile/);
   });
 
   it("handles rejected getAccessToken, AUTH_REQUIRED delete errors, and checking/unavailable/unauthenticated transitions safely", async () => {

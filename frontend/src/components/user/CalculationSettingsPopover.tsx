@@ -12,6 +12,7 @@ import type { ChartSettings, Locale } from "@/lib/kundali/types";
 
 interface CalculationSettingsPopoverProps {
   open: boolean;
+  align?: "start" | "end";
   locale: Locale;
   appliedSettings: ChartSettings;
   stagedSettings: ChartSettings;
@@ -40,6 +41,7 @@ interface CalculationSettingsPopoverProps {
 
 export function CalculationSettingsPopover({
   open,
+  align = "end",
   locale,
   appliedSettings,
   stagedSettings,
@@ -68,7 +70,7 @@ export function CalculationSettingsPopover({
           onClose();
         }
       }}
-      className="absolute right-0 top-full z-30 mt-2 w-[min(calc(100vw-2rem),380px)] rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] p-4 shadow-lg"
+      className={`fixed inset-x-4 top-24 z-40 max-h-[calc(100dvh-7rem)] overflow-y-auto rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] p-4 shadow-lg sm:absolute sm:inset-x-auto sm:top-full sm:mt-2 sm:w-[380px] ${align === "start" ? "sm:left-0" : "sm:right-0"}`}
     >
       <div className="flex items-center justify-between border-b border-[var(--kundali-border-subtle)] pb-2.5">
         <h3 className="text-sm font-semibold text-[var(--kundali-navy)]">{labels.title}</h3>

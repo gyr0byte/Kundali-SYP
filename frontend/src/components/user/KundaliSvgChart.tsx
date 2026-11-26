@@ -87,6 +87,38 @@ function handleCellKeyDown(
   }
 }
 
+export function KundaliChartPlaceholder({
+  chartStyle = "north",
+  loading = false,
+}: {
+  chartStyle?: ChartStyle;
+  loading?: boolean;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 360 360"
+      data-testid={loading ? "chart-skeleton" : undefined}
+      className={loading ? "block aspect-square w-full max-w-[360px]" : "block w-full"}
+    >
+      {!loading ? (
+        <circle cx="180" cy="180" r="166" fill="none" stroke="var(--kundali-border)" />
+      ) : null}
+      <g transform={loading ? undefined : "translate(44 44) scale(.7556)"}>
+        <rect x="8" y="8" width="344" height="344" fill="var(--kundali-cream)"
+          stroke="var(--kundali-border)" strokeWidth="2" />
+        <path
+          d={chartStyle === "north"
+            ? "M8 8l344 344M352 8 8 352M180 8 352 180 180 352 8 180Z"
+            : "M8 94h344M8 266h344M94 8v344M266 8v344M180 8v86m0 172v86M8 180h86m172 0h86"}
+          fill="none" stroke="var(--kundali-border)" strokeWidth="1.5"
+        />
+      </g>
+    </svg>
+  );
+}
+
 export function KundaliSvgChart({
   chart,
   chartStyle,
@@ -204,6 +236,7 @@ export function KundaliSvgChart({
                 y={pt.signY}
                 textAnchor="middle"
                 fontSize="10"
+                className="max-sm:text-[11px]"
                 fontWeight="600"
                 fill="#4B5966"
               >
@@ -215,6 +248,7 @@ export function KundaliSvgChart({
                   y={pt.y - 10}
                   textAnchor="middle"
                   fontSize="11"
+                  className="max-sm:text-[13px]"
                   fontWeight="700"
                   fill="#13293D"
                 >
@@ -228,6 +262,7 @@ export function KundaliSvgChart({
                   y={pt.y + (pt.house === 1 ? 6 : -10) + idx * 14}
                   textAnchor="middle"
                   fontSize="11"
+                  className="max-sm:text-[13px]"
                   fontWeight="600"
                   fill={isHighlighted ? "#1B6B4A" : "#18222D"}
                 >
@@ -348,7 +383,7 @@ export function KundaliSvgChart({
                 strokeWidth="1.75"
               />
             ) : null}
-            <text x={x + 6} y={y + 14} fontSize="9.5" fontWeight="600" fill="#4B5966">
+            <text x={x + 6} y={y + 14} fontSize="9.5" className="max-sm:text-[10.5px]" fontWeight="600" fill="#4B5966">
               {locale === "ne" ? sign.shortNe : sign.shortEn} · H{houseNum}
             </text>
             {isLagnaSign ? (
@@ -369,6 +404,7 @@ export function KundaliSvgChart({
                 x={x + 7}
                 y={y + 30 + idx * 13}
                 fontSize="10.5"
+                className="max-sm:text-[12.5px]"
                 fontWeight="600"
                 fill={p.id === highlightedFactId ? "#1B6B4A" : "#18222D"}
               >
