@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useOptionalAuthSession } from "@/components/auth/AuthSessionProvider";
+import { calculateChart, getChartIssue, matchesChartProfile, type ChartIssue } from "@/lib/api/charts";
 import { ApiClientError } from "@/lib/api/client";
 import {
   createProfile,
@@ -49,6 +50,7 @@ import type {
   BirthProfile,
   BirthProfileCreatePayload,
   ChartCalculationState,
+  ChartCalculationResponse,
   ChartFacts,
   ChartSettings,
   ChartStyle,
@@ -73,6 +75,7 @@ export interface WorkspaceMessages {
   localeLabel: string;
   provenanceSwieph: string;
   provenanceMoshier: string;
+  provenanceMixed: string;
   provenanceUnknown: string;
   profileLabel: string;
   newProfileButton: string;
@@ -102,7 +105,7 @@ export interface WorkspaceMessages {
   scopeDashaOnly: string;
   scopeFullChart: string;
   discard: string;
-  applyAndRecompute: string;
+  applySettings: string;
   close: string;
   authRequiredBannerTitle: string;
   authRequiredBannerBody: string;
@@ -138,7 +141,6 @@ export interface WorkspaceMessages {
   profileCreatedNotice: string;
   profileUpdatedNotice: string;
   profileDeletedNotice: string;
-  savedProfileChartPendingTitle: string;
   savedProfileBsStatusBadge: string;
   sampleBannerTitle: string;
   sampleBannerBody: string;
@@ -147,9 +149,20 @@ export interface WorkspaceMessages {
   unknownTimeBannerTitle: string;
   unknownTimeBannerBody: string;
   lagnaSensitivityTitle: string;
-  awaitingBsBody: string;
-  awaitingApiBody: string;
   awaitingRecomputeBody: string;
+  calculateChart: string;
+  calculatingChart: string;
+  chartCalculated: string;
+  chartEmpty: string;
+  selectProfileForChart: string;
+  readyToCalculate: string;
+  recalculateChart: string;
+  retryChart: string;
+  reloadChartProfiles: string;
+  lagnaSensitivityBody: string;
+  skipToWorkspace: string;
+  compatibilityUnavailable: string;
+  chartIssues: Record<ChartIssue, string>;
   dashaOnlyNotice: string;
   chartSectionTitle: string;
   northLabel: string;
@@ -236,20 +249,11 @@ const DEFAULT_SETTINGS: ChartSettings = {
   preset: null,
 };
 
-function computeProfileState(
+function getSamplePreview(
   profile: BirthProfile | null,
   settings: ChartSettings
 ): { state: ChartCalculationState; chart: ChartFacts | null } {
-  if (!profile) {
-    return { state: "unavailable", chart: null };
-  }
-  if (profile.input_calendar === "BS" && !profile.date_ad) {
-    return { state: "awaiting_bs_conversion", chart: null };
-  }
-  if (profile.time_certainty === "unknown") {
-    return { state: "unknown_time_unimplemented", chart: null };
-  }
-  if (profile.is_synthetic_sample && profile.id === SAMPLE_NORTH_LONDON_PROFILE.id) {
+  if (profile?.is_synthetic_sample && profile.id === SAMPLE_NORTH_LONDON_PROFILE.id) {
     const base = SAMPLE_NORTH_LONDON_CHART_FACTS.settings;
     const ephemerisMatches =
       settings.ayanamsha === base.ayanamsha &&
@@ -258,19 +262,15 @@ function computeProfileState(
     if (!ephemerisMatches) {
       return { state: "awaiting_recompute", chart: null };
     }
-    return {
-      state: "ready",
-      chart: {
-        ...SAMPLE_NORTH_LONDON_CHART_FACTS,
-        settings: {
-          ...SAMPLE_NORTH_LONDON_CHART_FACTS.settings,
-          year_days: settings.year_days,
-        },
-      },
-    };
+    return { state: "ready", chart: SAMPLE_NORTH_LONDON_CHART_FACTS };
   }
   return { state: "unavailable", chart: null };
 }
+
+type ChartRun =
+  | { status: "idle" | "loading" }
+  | { status: "error"; issue: ChartIssue }
+  | { status: "success"; result: ChartCalculationResponse };
 
 export function UserChartWorkspace({
   messagesByLocale,
@@ -306,13 +306,17 @@ export function UserChartWorkspace({
   const [sessionFeedback, setSessionFeedback] = useState<LogoutOutcomeBanner | null>(null);
   const [apiErrorBanner, setApiErrorBanner] = useState<string | null>(null);
   const [formServerErrors, setFormServerErrors] = useState<readonly string[]>([]);
-  const [profileActionNotice, setProfileActionNotice] = useState<string | null>(null);
+  const [profileActionNotice, setProfileActionNotice] = useState<
+    "profileCreatedNotice" | "profileUpdatedNotice" | "profileDeletedNotice" | null
+  >(null);
 
   const [displayCalendar, setDisplayCalendar] = useState<DisplayCalendarPreference>("AD");
   const [appliedSettings, setAppliedSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
   const [stagedSettings, setStagedSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
+  const chartRequestRef = useRef<AbortController | null>(null);
+  const [showDashaNotice, setShowDashaNotice] = useState(false);
   const [chartStyle, setChartStyle] = useState<ChartStyle>("north");
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat");
   const [mobilePane, setMobilePane] = useState<"chart" | "secondary">("chart");
@@ -328,10 +332,73 @@ export function UserChartWorkspace({
     authStatus === "unauthenticated" ? applySessionCleared(profileState) : profileState;
   const visibleProfiles = resolveVisibleProfiles(displayedProfileState);
   const activeProfile = resolveActiveProfile(displayedProfileState);
-  const { state: calcState, chart } = computeProfileState(activeProfile, appliedSettings);
+  const chartProfile = isAuthenticated && activeProfile && !activeProfile.is_synthetic_sample &&
+    (hasExplicitTokenProp || activeProfile.owner_id === session?.user?.id)
+    ? activeProfile
+    : null;
+  // Dasha year length does not change placements. A new calculation sends
+  // the latest applied year length; a displayed result keeps its own settings.
+  const chartContext = chartProfile ? JSON.stringify([
+    chartProfile.owner_id, chartProfile.id, chartProfile.updated_at,
+    appliedSettings.ayanamsha, appliedSettings.house_system,
+    appliedSettings.node_type, appliedSettings.preset,
+  ]) : null;
+  const [chartState, setChartState] = useState<{
+    context: string | null;
+    provider: AccessTokenProvider | undefined;
+    run: ChartRun;
+  }>(
+    { context: chartContext, provider: getAccessToken, run: { status: "idle" } }
+  );
+  const sameContext = chartState.context === chartContext && chartState.provider === getAccessToken;
+  const chartRun: ChartRun = sameContext ? chartState.run : { status: "idle" };
+  if (!sameContext) {
+    setChartState({ context: chartContext, provider: getAccessToken, run: chartRun });
+    if (highlightedFactId) setHighlightedFactId(null);
+  }
+
+  useLayoutEffect(() => {
+    return () => {
+      chartRequestRef.current?.abort();
+      chartRequestRef.current = null;
+    };
+  }, [chartContext, getAccessToken]);
+
+  const samplePreview = getSamplePreview(activeProfile, appliedSettings);
+  const result = chartRun.status === "success" ? chartRun.result : null;
+  const chart = result?.chart ?? samplePreview.chart;
+  const calcState = result ? "ready" : samplePreview.state;
+  const resolvedSettings = chart?.settings ?? appliedSettings;
   const provenanceStatus = getProvenanceStatus(chart, calcState);
   const unknownTimeMode = isUnknownTimeProfile(activeProfile);
   const sensitivityFact = getSensitivityFact(chart);
+
+  async function handleCalculateChart() {
+    if (!chartProfile || chartRequestRef.current || isLoadingProfiles) return;
+    const request = new AbortController();
+    chartRequestRef.current = request;
+    setHighlightedFactId(null);
+    const context = { context: chartContext, provider: getAccessToken };
+    setChartState({ ...context, run: { status: "loading" } });
+    try {
+      const response = await calculateChart({
+        getAccessToken: effectiveGetAccessToken,
+        onUnauthorizedRefresh: effectiveOnUnauthorizedRefresh,
+        baseUrl: apiBaseUrl,
+      }, chartProfile, appliedSettings, request.signal);
+      if (request.signal.aborted) return;
+      const run: ChartRun = matchesChartProfile(response, chartProfile)
+        ? { status: "success", result: response }
+        : { status: "error", issue: "profileChanged" };
+      setChartState({ ...context, run });
+    } catch (error: unknown) {
+      if (!request.signal.aborted) {
+        setChartState({ ...context, run: { status: "error", issue: getChartIssue(error) } });
+      }
+    } finally {
+      if (chartRequestRef.current === request) chartRequestRef.current = null;
+    }
+  }
 
   const getLiveContextForCoordinator = useCallback((): {
     status: AuthSessionStatus;
@@ -431,7 +498,7 @@ export function UserChartWorkspace({
       !hasExplicitTokenProp && session
         ? (session.user?.id ?? "session-user")
         : `prop-session-${explicitProviderSeqRef.current}`;
-    await executeProfileListFetch(ownerKey);
+    return executeProfileListFetch(ownerKey);
   }, [executeProfileListFetch, hasExplicitTokenProp, session]);
 
   useEffect(() => {
@@ -514,7 +581,7 @@ export function UserChartWorkspace({
     setProfileState((prev) => activateSyntheticSamplePreview(prev));
     setAppliedSettings(DEFAULT_SETTINGS);
     setStagedSettings(DEFAULT_SETTINGS);
-    setSettingsNotice(null);
+    setShowDashaNotice(false);
     setProfileActionNotice(null);
     setApiErrorBanner(null);
     setFormServerErrors([]);
@@ -631,7 +698,7 @@ export function UserChartWorkspace({
           return;
         }
         setProfileState((prev) => applyUpdatedProfile(prev, updated));
-        setProfileActionNotice(t.profileUpdatedNotice);
+        setProfileActionNotice("profileUpdatedNotice");
       } else {
         const created = await createProfile(clientConfig, payload);
         if (
@@ -644,10 +711,10 @@ export function UserChartWorkspace({
           return;
         }
         setProfileState((prev) => applyCreatedProfile(prev, created));
-        setProfileActionNotice(t.profileCreatedNotice);
+        setProfileActionNotice("profileCreatedNotice");
       }
       setFormMode("closed");
-      setSettingsNotice(null);
+      setShowDashaNotice(false);
       setHighlightedFactId(null);
     } catch (err) {
       if (profileLoadCoordinator.getSnapshot().generation !== requestGeneration) {
@@ -707,7 +774,7 @@ export function UserChartWorkspace({
       }
       setProfileState((prev) => applyDeletedProfile(prev, profileId));
       setConfirmDeleteId(null);
-      setProfileActionNotice(t.profileDeletedNotice);
+      setProfileActionNotice("profileDeletedNotice");
       setHighlightedFactId(null);
     } catch (err) {
       if (profileLoadCoordinator.getSnapshot().generation !== requestGeneration) {
@@ -738,12 +805,17 @@ export function UserChartWorkspace({
     }
   }
 
+  function closeSettings() {
+    setSettingsOpen(false);
+    settingsTriggerRef.current?.focus();
+  }
+
   function handleApplySettings() {
     const scope = classifySettingsChange(appliedSettings, stagedSettings);
     if (scope === "none") return;
     setAppliedSettings(stagedSettings);
-    setSettingsOpen(false);
-    setSettingsNotice(scope === "dasha_only" ? t.dashaOnlyNotice : null);
+    closeSettings();
+    setShowDashaNotice(scope === "dasha_only");
   }
 
   function handleDiscardSettings() {
@@ -762,32 +834,52 @@ export function UserChartWorkspace({
       ? t.provenanceSwieph
       : provenanceStatus === "moshier"
         ? t.provenanceMoshier
-        : t.provenanceUnknown;
+        : provenanceStatus === "mixed"
+          ? t.provenanceMixed
+          : t.provenanceUnknown;
 
+  const hasEphemerisFallback = provenanceStatus === "moshier" || provenanceStatus === "mixed";
   const provenanceClasses =
     provenanceStatus === "swieph"
       ? "border-[var(--kundali-emerald-border)] bg-[var(--kundali-emerald-bg)] text-[var(--kundali-emerald)]"
-      : provenanceStatus === "moshier"
-        ? "border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] text-[var(--kundali-amber)]"
+      : hasEphemerisFallback
+        ? "border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] text-[var(--kundali-ink)]"
         : "border-[var(--kundali-slate-border)] bg-[var(--kundali-slate-bg)] text-[var(--kundali-ink)]";
 
-  const unavailableReason =
-    calcState === "awaiting_bs_conversion"
-      ? t.awaitingBsBody
-      : calcState === "awaiting_recompute"
-        ? t.awaitingRecomputeBody
-        : t.awaitingApiBody;
+  const profileIssue: ChartIssue | null = chartProfile
+    ? chartProfile.bs_conversion_status === "awaiting_bs_conversion" ||
+      (chartProfile.input_calendar === "BS" && !chartProfile.date_ad)
+      ? "bsPending"
+      : chartProfile.time_certainty === "unknown"
+        ? "unknownTime"
+        : !chartProfile.date_ad || !chartProfile.time_local || !chartProfile.timezone
+          ? "incomplete"
+          : null
+    : null;
+  const chartIssue = chartRun.status === "error" ? chartRun.issue : profileIssue;
+  const shouldReloadProfiles = chartIssue === "profileChanged" || chartIssue === "missing";
+  const canRetryChart = chartIssue === "network" || chartIssue === "server";
+  const isCalculating = chartRun.status === "loading";
+
+  async function handleReloadChartProfiles() {
+    const loaded = await loadSavedProfilesFromApi();
+    if (loaded) {
+      setChartState((current) => current === chartState
+        ? { ...current, run: { status: "idle" } }
+        : current);
+    }
+  }
 
   const showForm = formMode !== "closed" || !activeProfile;
   const effectiveFormMode: "create" | "edit" =
     formMode === "edit" && activeProfile && !activeProfile.is_synthetic_sample ? "edit" : "create";
   const editingTarget = effectiveFormMode === "edit" ? activeProfile : null;
-  const showSavedPendingBanner = Boolean(
-    activeProfile && !activeProfile.is_synthetic_sample && calcState === "unavailable"
-  );
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--kundali-cream)] text-[var(--kundali-ink)]">
+    <div lang={locale} className="flex min-h-screen flex-col bg-[var(--kundali-cream)] text-[var(--kundali-ink)]">
+      <a href="#workspace-main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:z-50 focus:bg-white focus:px-3 focus:py-2">
+        {t.skipToWorkspace}
+      </a>
       {/* Top Shell Header */}
       <header className="border-b-2 border-[var(--kundali-emerald)] bg-[var(--kundali-navy)] px-4 py-2.5 text-[var(--kundali-cream)] sm:px-6">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3">
@@ -825,7 +917,7 @@ export function UserChartWorkspace({
                 aria-hidden="true"
                 className="shrink-0"
               >
-                <circle cx="5" cy="5" r="4" fill="currentColor" />
+                <circle cx="5" cy="5" r="4" fill={hasEphemerisFallback ? "var(--kundali-amber)" : "currentColor"} />
               </svg>
               {provenanceLabel}
             </span>
@@ -942,9 +1034,9 @@ export function UserChartWorkspace({
       {/* Profile & Conventions Strip */}
       <div className="border-b border-[var(--kundali-border)] bg-[var(--kundali-strip)] px-4 py-2.5 sm:px-6">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2.5">
             {visibleProfiles.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
                 <label htmlFor="active-profile-select" className="sr-only">
                   {t.profileLabel}
                 </label>
@@ -959,7 +1051,7 @@ export function UserChartWorkspace({
                     setFormServerErrors([]);
                     setHighlightedFactId(null);
                   }}
-                  className="rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2.5 py-1.5 text-xs font-semibold text-[var(--kundali-navy)]"
+                  className="min-w-0 max-w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2.5 py-1.5 text-xs font-semibold text-[var(--kundali-navy)] sm:max-w-64"
                 >
                   {visibleProfiles.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -982,7 +1074,7 @@ export function UserChartWorkspace({
                         activeProfile.time_certainty === "exact"
                           ? "border-[var(--kundali-emerald-border)] bg-[var(--kundali-emerald-bg)] text-[var(--kundali-emerald)]"
                           : activeProfile.time_certainty === "approximate"
-                            ? "border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] text-[var(--kundali-amber)]"
+                          ? "border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] text-[var(--kundali-ink)]"
                             : "border-[var(--kundali-slate-border)] bg-[var(--kundali-slate-bg)] text-[var(--kundali-ink)]"
                       }`}
                     >
@@ -1046,7 +1138,7 @@ export function UserChartWorkspace({
             ) : null}
           </div>
 
-          <div className="relative flex flex-wrap items-center gap-2">
+          <div className="relative flex min-w-0 flex-wrap items-center gap-2 max-sm:w-full">
             <div
               className="inline-flex items-center overflow-hidden rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] text-[11px]"
               role="group"
@@ -1079,12 +1171,14 @@ export function UserChartWorkspace({
             </div>
 
             <span className="hidden rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2 py-1 font-mono text-[11px] text-[var(--kundali-muted)] md:inline-block">
-              {appliedSettings.ayanamsha} · {appliedSettings.node_type} ·{" "}
-              {appliedSettings.house_system} · {appliedSettings.year_days}d
+              {resolvedSettings.ayanamsha} · {resolvedSettings.node_type} ·{" "}
+              {resolvedSettings.house_system} · {resolvedSettings.year_days}d
             </span>
 
             <button
+              ref={settingsTriggerRef}
               type="button"
+              aria-haspopup="dialog"
               aria-expanded={settingsOpen}
               onClick={() => {
                 setStagedSettings(appliedSettings);
@@ -1103,7 +1197,7 @@ export function UserChartWorkspace({
               onStageChange={setStagedSettings}
               onDiscard={handleDiscardSettings}
               onApply={handleApplySettings}
-              onClose={() => setSettingsOpen(false)}
+              onClose={closeSettings}
               labels={{
                 title: t.settingsTitle,
                 presetLabel: t.presetLabel,
@@ -1118,7 +1212,7 @@ export function UserChartWorkspace({
                 scopeDashaOnly: t.scopeDashaOnly,
                 scopeFullChart: t.scopeFullChart,
                 discard: t.discard,
-                applyAndRecompute: t.applyAndRecompute,
+                applySettings: t.applySettings,
                 close: t.close,
               }}
             />
@@ -1127,7 +1221,7 @@ export function UserChartWorkspace({
       </div>
 
       {/* Main Content */}
-      <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-5 sm:px-6">
+      <main id="workspace-main" tabIndex={-1} className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-5 sm:px-6">
         {sessionFeedback ? (
           <div
             role={sessionFeedback.tone === "crimson" ? "alert" : "status"}
@@ -1254,7 +1348,7 @@ export function UserChartWorkspace({
             role="status"
             className="mb-4 rounded border border-[var(--kundali-emerald-border)] bg-[var(--kundali-emerald-bg)] px-4 py-2.5 text-xs font-medium text-[var(--kundali-emerald)]"
           >
-            {profileActionNotice}
+            {t[profileActionNotice]}
           </div>
         ) : null}
 
@@ -1264,7 +1358,7 @@ export function UserChartWorkspace({
             aria-label={t.deleteProfileButton}
             className="mb-4 rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-crimson-bg)] px-4 py-3 text-xs"
           >
-            <p className="font-semibold text-[var(--kundali-crimson)]">
+            <p className="font-semibold text-[var(--kundali-crimson)] [overflow-wrap:anywhere]">
               {activeProfile.label} — {t.deleteConfirmPrompt}
             </p>
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
@@ -1294,10 +1388,16 @@ export function UserChartWorkspace({
           </div>
         ) : null}
 
-        {settingsNotice ? (
+        {showDashaNotice ? (
           <div className="mb-4 rounded border border-[var(--kundali-emerald-border)] bg-[var(--kundali-emerald-bg)] px-3.5 py-2 text-xs font-medium text-[var(--kundali-emerald)]">
-            {settingsNotice}
+            {t.dashaOnlyNotice}
           </div>
+        ) : null}
+
+        {isAuthenticated && !isLoadingProfiles && !activeProfile ? (
+          <p role="status" className="mb-4 text-sm text-[var(--kundali-muted)]">
+            {t.selectProfileForChart}
+          </p>
         ) : null}
 
         {showForm ? (
@@ -1399,7 +1499,7 @@ export function UserChartWorkspace({
                           onClick={() => {
                             setAppliedSettings(DEFAULT_SETTINGS);
                             setStagedSettings(DEFAULT_SETTINGS);
-                            setSettingsNotice(null);
+                            setShowDashaNotice(false);
                           }}
                           className="rounded border border-[var(--kundali-emerald)] bg-[var(--kundali-surface)] px-2.5 py-1 text-[11px] font-semibold text-[var(--kundali-emerald)]"
                         >
@@ -1413,20 +1513,47 @@ export function UserChartWorkspace({
                   </div>
                 ) : null}
 
-                {showSavedPendingBanner ? (
-                  <div className="rounded border border-[var(--kundali-slate-border)] bg-[var(--kundali-surface)] px-4 py-3 text-xs">
-                    <p className="font-semibold text-[var(--kundali-navy)]">
-                      {t.savedProfileChartPendingTitle}
-                    </p>
-                    <p className="mt-1 leading-relaxed text-[var(--kundali-muted)]">
-                      {t.awaitingApiBody}
-                    </p>
+                {chartProfile ? (
+                  <div className="flex min-h-16 flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-4 py-3 text-xs">
+                    <div className="min-w-0 flex-1 basis-40 leading-relaxed">
+                      <p role="status" className="font-semibold text-[var(--kundali-navy)]">
+                        {isCalculating ? t.calculatingChart : result ? t.chartCalculated : chartIssue ? "" : t.readyToCalculate}
+                      </p>
+                      {chartIssue ? (
+                        <p role={chartRun.status === "error" ? "alert" : undefined} className="text-[var(--kundali-crimson)]">
+                          {t.chartIssues[chartIssue]}
+                        </p>
+                      ) : null}
+                    </div>
+                    {chartIssue === "auth" ? (
+                      <Link href="/login" className="font-semibold text-[var(--kundali-navy)] underline">
+                        {t.signInNavButton}
+                      </Link>
+                    ) : shouldReloadProfiles ? (
+                      <button
+                        type="button"
+                        disabled={isLoadingProfiles}
+                        onClick={() => void handleReloadChartProfiles()}
+                        className="rounded border border-[var(--kundali-border)] px-3 py-1.5 font-semibold text-[var(--kundali-navy)] hover:bg-[var(--kundali-strip)]"
+                      >
+                        {t.reloadChartProfiles}
+                      </button>
+                    ) : !chartIssue || canRetryChart ? (
+                      <button
+                        type="button"
+                        aria-disabled={isCalculating || isLoadingProfiles}
+                        onClick={() => void handleCalculateChart()}
+                        className="rounded bg-[var(--kundali-navy)] px-3 py-1.5 font-semibold text-[var(--kundali-cream)] hover:bg-[var(--kundali-navy-hover)] aria-disabled:opacity-60"
+                      >
+                        {canRetryChart ? t.retryChart : result ? t.recalculateChart : t.calculateChart}
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
 
                 {activeProfile?.time_certainty === "approximate" ? (
                   <div className="rounded border border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] px-4 py-3 text-xs">
-                    <p className="font-semibold text-[var(--kundali-amber)]">
+                    <p className="font-semibold text-[var(--kundali-ink)]">
                       {t.approxBannerTitle}
                     </p>
                     <p className="mt-1 leading-relaxed text-[var(--kundali-ink)]">
@@ -1437,12 +1564,13 @@ export function UserChartWorkspace({
 
                 {sensitivityFact ? (
                   <div className="rounded border border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] px-4 py-3 text-xs">
-                    <p className="font-semibold text-[var(--kundali-amber)]">
+                    <p className="font-semibold text-[var(--kundali-ink)]">
                       {t.lagnaSensitivityTitle}
                     </p>
                     <p className="mt-1 leading-relaxed text-[var(--kundali-ink)]">
-                      {sensitivityFact.note} ({sensitivityFact.degree_in_sign.toFixed(2)}°;{" "}
-                      {sensitivityFact.boundary_distance_degrees.toFixed(2)}° from cusp)
+                      {t.lagnaSensitivityBody.replace(
+                        "{distance}", sensitivityFact.boundary_distance_degrees.toFixed(2)
+                      )}
                     </p>
                   </div>
                 ) : null}
@@ -1480,13 +1608,13 @@ export function UserChartWorkspace({
                       </div>
                     </div>
 
-                    <div className="flex justify-center">
+                    <div className="flex justify-center" aria-busy={isCalculating}>
                       <KundaliSvgChart
                         chart={chart}
                         chartStyle={chartStyle}
                         locale={locale}
                         unknownTimeMode={unknownTimeMode}
-                        unavailableReason={unavailableReason}
+                        unavailableReason={calcState === "awaiting_recompute" ? t.awaitingRecomputeBody : null}
                         highlightedFactId={highlightedFactId}
                         onSelectFact={setHighlightedFactId}
                         labels={{
@@ -1495,7 +1623,7 @@ export function UserChartWorkspace({
                           southLabel: t.southLabel,
                           unknownTimeNoticeTitle: t.unknownTimeBannerTitle,
                           unknownTimeNoticeBody: t.unknownTimeBannerBody,
-                          unavailableTitle: activeProfile?.label ?? "",
+                          unavailableTitle: t.chartEmpty,
                           houseWord: t.houseWord,
                           lagnaShort: t.lagnaShort,
                         }}
@@ -1555,11 +1683,17 @@ export function UserChartWorkspace({
                         {t.tableSectionTitle}
                       </h2>
                       {chart ? (
-                        <span className="font-mono text-[11px] text-[var(--kundali-muted)]">
+                        <span className="min-w-0 break-all font-mono text-[11px] text-[var(--kundali-muted)]">
                           {chart.chart_id} · v{chart.engine_version}
                         </span>
                       ) : null}
                     </div>
+                    {result ? (
+                      <p className="mb-3 break-words font-mono text-[11px] text-[var(--kundali-muted)] md:hidden">
+                        {resolvedSettings.ayanamsha} · {resolvedSettings.node_type} ·{" "}
+                        {resolvedSettings.house_system} · {resolvedSettings.year_days}d
+                      </p>
+                    ) : null}
 
                     <PlanetaryTable
                       chart={chart}
@@ -1614,6 +1748,7 @@ export function UserChartWorkspace({
                     transitsContractBody: t.transitsContractBody,
                     stubBadge: t.stubBadge,
                     unavailableNoChart: t.unavailableNoChart,
+                    compatibilityUnavailable: t.compatibilityUnavailable,
                   }}
                 />
               </div>

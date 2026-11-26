@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { classifySettingsChange } from "@/lib/kundali/chart-helpers";
 import {
   AYANAMSHA_OPTIONS,
@@ -8,7 +8,7 @@ import {
   NODE_TYPE_OPTIONS,
   YEAR_DAYS_OPTIONS,
 } from "@/lib/kundali/constants";
-import type { AyanamshaMode, ChartSettings, Locale, NodeType } from "@/lib/kundali/types";
+import type { ChartSettings, Locale } from "@/lib/kundali/types";
 
 interface CalculationSettingsPopoverProps {
   open: boolean;
@@ -33,7 +33,7 @@ interface CalculationSettingsPopoverProps {
     scopeDashaOnly: string;
     scopeFullChart: string;
     discard: string;
-    applyAndRecompute: string;
+    applySettings: string;
     close: string;
   };
 }
@@ -49,6 +49,11 @@ export function CalculationSettingsPopover({
   onClose,
   labels,
 }: CalculationSettingsPopoverProps) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (open) closeButtonRef.current?.focus();
+  }, [open]);
+
   if (!open) return null;
 
   const scope = classifySettingsChange(appliedSettings, stagedSettings);
@@ -57,11 +62,18 @@ export function CalculationSettingsPopover({
     <div
       role="dialog"
       aria-label={labels.title}
-      className="absolute right-0 top-full z-30 mt-2 w-[min(92vw,380px)] rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] p-4 shadow-lg"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        }
+      }}
+      className="absolute right-0 top-full z-30 mt-2 w-[min(calc(100vw-2rem),380px)] rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] p-4 shadow-lg"
     >
       <div className="flex items-center justify-between border-b border-[var(--kundali-border-subtle)] pb-2.5">
         <h3 className="text-sm font-semibold text-[var(--kundali-navy)]">{labels.title}</h3>
         <button
+          ref={closeButtonRef}
           type="button"
           onClick={onClose}
           className="rounded px-2 py-0.5 text-xs font-medium text-[var(--kundali-muted)] hover:bg-[var(--kundali-strip)]"
@@ -119,13 +131,10 @@ export function CalculationSettingsPopover({
           <select
             id="calc-ayanamsha"
             value={stagedSettings.ayanamsha}
-            onChange={(e) =>
-              onStageChange({
-                ...stagedSettings,
-                ayanamsha: e.target.value as AyanamshaMode,
-                preset: null,
-              })
-            }
+            onChange={(e) => {
+              const option = AYANAMSHA_OPTIONS.find(({ value }) => value === e.target.value);
+              if (option) onStageChange({ ...stagedSettings, ayanamsha: option.value, preset: null });
+            }}
             className="mt-1 w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2.5 py-1.5 text-xs text-[var(--kundali-ink)]"
           >
             {AYANAMSHA_OPTIONS.map((opt) => (
@@ -146,13 +155,10 @@ export function CalculationSettingsPopover({
           <select
             id="calc-node-type"
             value={stagedSettings.node_type}
-            onChange={(e) =>
-              onStageChange({
-                ...stagedSettings,
-                node_type: e.target.value as NodeType,
-                preset: null,
-              })
-            }
+            onChange={(e) => {
+              const option = NODE_TYPE_OPTIONS.find(({ value }) => value === e.target.value);
+              if (option) onStageChange({ ...stagedSettings, node_type: option.value, preset: null });
+            }}
             className="mt-1 w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2.5 py-1.5 text-xs text-[var(--kundali-ink)]"
           >
             {NODE_TYPE_OPTIONS.map((opt) => (
@@ -182,12 +188,10 @@ export function CalculationSettingsPopover({
           <select
             id="calc-year-days"
             value={String(stagedSettings.year_days)}
-            onChange={(e) =>
-              onStageChange({
-                ...stagedSettings,
-                year_days: Number(e.target.value),
-              })
-            }
+            onChange={(e) => {
+              const option = YEAR_DAYS_OPTIONS.find(({ value }) => String(value) === e.target.value);
+              if (option) onStageChange({ ...stagedSettings, year_days: option.value });
+            }}
             className="mt-1 w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2.5 py-1.5 text-xs text-[var(--kundali-ink)]"
           >
             {YEAR_DAYS_OPTIONS.map((opt) => (
@@ -204,7 +208,7 @@ export function CalculationSettingsPopover({
               ? "border-[var(--kundali-border-subtle)] bg-[var(--kundali-cream)] text-[var(--kundali-muted)]"
               : scope === "dasha_only"
                 ? "border-[var(--kundali-emerald-border)] bg-[var(--kundali-emerald-bg)] text-[var(--kundali-emerald)]"
-                : "border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] text-[var(--kundali-amber)]"
+                : "border-[var(--kundali-amber-border)] bg-[var(--kundali-amber-bg)] text-[var(--kundali-ink)]"
           }`}
         >
           {scope === "none"
@@ -215,7 +219,7 @@ export function CalculationSettingsPopover({
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-end gap-2 border-t border-[var(--kundali-border-subtle)] pt-3">
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--kundali-border-subtle)] pt-3">
         <button
           type="button"
           onClick={onDiscard}
@@ -230,7 +234,7 @@ export function CalculationSettingsPopover({
           disabled={scope === "none"}
           className="rounded bg-[var(--kundali-navy)] px-3 py-1.5 text-xs font-semibold text-[var(--kundali-cream)] hover:bg-[var(--kundali-navy-hover)] disabled:cursor-not-allowed disabled:opacity-45"
         >
-          {labels.applyAndRecompute}
+          {labels.applySettings}
         </button>
       </div>
     </div>

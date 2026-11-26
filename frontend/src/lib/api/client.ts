@@ -27,18 +27,21 @@ export class ApiClientError extends Error {
   readonly code: ApiErrorCode;
   readonly status: number | null;
   readonly validationMessages: readonly string[];
+  readonly responseCode: string | null;
 
   constructor(params: {
     code: ApiErrorCode;
     status: number | null;
     message: string;
     validationMessages?: readonly string[];
+    responseCode?: string;
   }) {
     super(params.message);
     this.name = "ApiClientError";
     this.code = params.code;
     this.status = params.status;
     this.validationMessages = params.validationMessages ?? [];
+    this.responseCode = params.responseCode ?? null;
   }
 }
 
@@ -110,7 +113,8 @@ async function sendAuthorizedFetch(
   method: "GET" | "POST" | "PATCH" | "DELETE",
   serializedBody: string | undefined,
   token: string,
-  fetchFn: typeof fetch
+  fetchFn: typeof fetch,
+  signal?: AbortSignal
 ): Promise<{ response: Response; parsedBody: unknown }> {
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -127,8 +131,11 @@ async function sendAuthorizedFetch(
       headers,
       body: serializedBody,
       credentials: "omit",
+      cache: "no-store",
+      signal,
     });
   } catch {
+    signal?.throwIfAborted();
     throw new ApiClientError({
       code: "NETWORK_ERROR",
       status: null,
@@ -152,6 +159,11 @@ async function sendAuthorizedFetch(
 }
 
 function buildApiErrorFromResponse(status: number, parsedBody: unknown): ApiClientError {
+  const responseCode =
+    parsedBody && typeof parsedBody === "object" && "code" in parsedBody &&
+    typeof parsedBody.code === "string"
+      ? parsedBody.code
+      : undefined;
   if (status === 401) {
     return new ApiClientError({
       code: "UNAUTHORIZED",
@@ -181,6 +193,7 @@ function buildApiErrorFromResponse(status: number, parsedBody: unknown): ApiClie
       message:
         validationMessages[0] ?? "Submitted birth profile data did not pass server validation.",
       validationMessages,
+      responseCode,
     });
   }
   if (status === 502 || status === 503 || status === 504) {
@@ -193,6 +206,7 @@ function buildApiErrorFromResponse(status: number, parsedBody: unknown): ApiClie
   return new ApiClientError({
     code: "HTTP_ERROR",
     status,
+    responseCode,
     message: extractDetailMessage(parsedBody) ?? `Request failed with status ${status}.`,
   });
 }
@@ -203,11 +217,13 @@ export async function apiRequest<T>(
     method?: "GET" | "POST" | "PATCH" | "DELETE";
     body?: unknown;
     config?: ApiClientConfig;
+    signal?: AbortSignal;
   } = {}
 ): Promise<T> {
-  const { method = "GET", body, config = {} } = options;
+  const { method = "GET", body, config = {}, signal } = options;
   // Never issue network requests without an injected access token.
   const token = await resolveValidToken(config.getAccessToken);
+  signal?.throwIfAborted();
 
   const fetchFn = config.fetchImpl ?? (typeof fetch === "function" ? fetch : null);
   if (!fetchFn) {
@@ -222,7 +238,8 @@ export async function apiRequest<T>(
   const url = `${resolveApiBaseUrl(config.baseUrl)}${normalizedPath}`;
   const serializedBody = body !== undefined ? JSON.stringify(body) : undefined;
 
-  let result = await sendAuthorizedFetch(url, method, serializedBody, token, fetchFn);
+  let result = await sendAuthorizedFetch(url, method, serializedBody, token, fetchFn, signal);
+  signal?.throwIfAborted();
   if (result.response.status === 401 && config.onUnauthorizedRefresh) {
     let refreshedRaw: string | null = null;
     try {
@@ -230,12 +247,14 @@ export async function apiRequest<T>(
     } catch {
       refreshedRaw = null;
     }
+    signal?.throwIfAborted();
     const refreshedToken = typeof refreshedRaw === "string" ? refreshedRaw.trim() : "";
     if (refreshedToken) {
-      result = await sendAuthorizedFetch(url, method, serializedBody, refreshedToken, fetchFn);
+      result = await sendAuthorizedFetch(url, method, serializedBody, refreshedToken, fetchFn, signal);
     }
   }
 
+  signal?.throwIfAborted();
   if (!result.response.ok) {
     throw buildApiErrorFromResponse(result.response.status, result.parsedBody);
   }

@@ -29,6 +29,7 @@ interface SecondaryContractTabsProps {
     transitsContractBody: string;
     stubBadge: string;
     unavailableNoChart: string;
+    compatibilityUnavailable: string;
   };
 }
 
@@ -213,6 +214,9 @@ export function SecondaryContractTabs({
           </p>
         </div>
       ) : null}
+      <p className="border-t border-[var(--kundali-border-subtle)] px-4 py-2.5 text-xs text-[var(--kundali-muted)]">
+        {labels.compatibilityUnavailable}
+      </p>
     </section>
   );
 }

@@ -54,7 +54,7 @@ export function getProvenanceStatus(
     return "unknown";
   }
   const src = chart.metadata?.ephemeris_source;
-  if (src === "swieph" || src === "moshier") {
+  if (src === "swieph" || src === "moshier" || src === "mixed") {
     return src;
   }
   return "unknown";

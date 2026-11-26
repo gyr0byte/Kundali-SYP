@@ -1,3 +1,5 @@
+import type { ChartSettings } from "./types";
+
 export interface SignDescriptor {
   index: number;
   en: string;
@@ -86,10 +88,10 @@ export const YEAR_DAYS_OPTIONS = [
   { value: 365.2425, labelEn: "365.2425 days (Gregorian)", labelNe: "३६५.२४२५ दिन" },
 ] as const;
 
-export const HAMRO_PATRO_COMPAT_PRESET = {
-  ayanamsha: "lahiri_1940" as const,
-  house_system: "whole_sign" as const,
-  node_type: "true" as const,
+export const HAMRO_PATRO_COMPAT_PRESET: ChartSettings = {
+  ayanamsha: "lahiri_1940",
+  house_system: "whole_sign",
+  node_type: "true",
   year_days: 365.25,
   preset: "hamro_patro_compat",
 };

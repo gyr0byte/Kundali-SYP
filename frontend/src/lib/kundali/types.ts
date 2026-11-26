@@ -14,7 +14,9 @@ export type HouseSystem = "whole_sign";
 
 export type DashaYearDays = 365.25 | 360 | 365.2425;
 
-export type EphemerisSource = "swieph" | "moshier";
+export type EphemerisSource = "swieph" | "moshier" | "mixed";
+
+export type ChartPreset = "hamro_patro_compat";
 
 export type ProvenanceDisplayStatus = EphemerisSource | "unknown";
 
@@ -26,8 +28,8 @@ export interface ChartSettings {
   ayanamsha: AyanamshaMode;
   house_system: HouseSystem;
   node_type: NodeType;
-  year_days: number;
-  preset: string | null;
+  year_days: DashaYearDays;
+  preset: ChartPreset | null;
 }
 
 export interface ChartMetadata {
@@ -75,11 +77,20 @@ export interface ChartFactSensitivity {
 export type ChartFact = ChartFactLagna | ChartFactPlacement | ChartFactSensitivity;
 
 export interface ChartFacts {
+  /** Opaque calculation result identifier, independent of profile or account identity. */
   chart_id: string;
   engine_version: string;
   settings: ChartSettings;
   metadata: ChartMetadata;
   facts: ChartFact[];
+}
+
+export interface ChartCalculationResponse {
+  profile_id: string;
+  profile_updated_at: string;
+  input_calendar: CalendarType;
+  time_certainty: TimeCertainty;
+  chart: ChartFacts;
 }
 
 export type BsConversionStatus = "resolved" | "awaiting_bs_conversion";

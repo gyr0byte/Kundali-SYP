@@ -100,7 +100,7 @@ export function KundaliSvgChart({
   if (unknownTimeMode) {
     return (
       <div
-        className="rounded border border-[var(--kundali-slate-border)] bg-[var(--kundali-slate-bg)]/45 p-5 text-sm text-[var(--kundali-ink)]"
+        className="flex aspect-square w-full max-w-[360px] flex-col justify-center rounded border border-[var(--kundali-slate-border)] bg-[var(--kundali-slate-bg)]/45 p-5 text-sm text-[var(--kundali-ink)]"
         role="region"
         aria-label={labels.unknownTimeNoticeTitle}
       >
@@ -118,7 +118,7 @@ export function KundaliSvgChart({
   if (!chart || !lagna) {
     return (
       <div
-        className="rounded border border-[var(--kundali-border)] bg-[var(--kundali-strip)]/60 p-5 text-sm text-[var(--kundali-muted)]"
+        className="flex aspect-square w-full max-w-[360px] flex-col justify-center rounded border border-[var(--kundali-border)] bg-[var(--kundali-strip)]/60 p-5 text-sm text-[var(--kundali-muted)]"
         role="region"
         aria-label={labels.unavailableTitle}
       >
@@ -182,7 +182,7 @@ export function KundaliSvgChart({
               role="button"
               aria-label={ariaText}
               aria-pressed={isHighlighted}
-              className="cursor-pointer focus:outline-none"
+              className="group cursor-pointer"
               onClick={() =>
                 onSelectFact(
                   isHighlighted && highlightedFactId === primaryTargetId ? null : primaryTargetId
@@ -197,6 +197,7 @@ export function KundaliSvgChart({
                 fill={isHighlighted ? "#E6F4EE" : "transparent"}
                 stroke={isHighlighted ? "#1B6B4A" : "transparent"}
                 strokeWidth="1.5"
+                className="group-focus-visible:stroke-[var(--kundali-amber)]"
               />
               <text
                 x={pt.signX}
@@ -293,10 +294,6 @@ export function KundaliSvgChart({
       <text x="180" y="186" textAnchor="middle" fontSize="10.5" fill="#4B5966">
         {chart.settings.ayanamsha.toUpperCase()} · {chart.settings.node_type.toUpperCase()}
       </text>
-      <text x="180" y="203" textAnchor="middle" fontSize="10" fill="#4B5966">
-        {chart.chart_id}
-      </text>
-
       {SOUTH_SIGN_CELLS.map(({ signIndex, col, row }) => {
         const x = pad + col * cellSize;
         const y = pad + row * cellSize;
@@ -323,7 +320,7 @@ export function KundaliSvgChart({
             role="button"
             aria-label={ariaText}
             aria-pressed={isHighlighted}
-            className="cursor-pointer focus:outline-none"
+            className="group cursor-pointer"
             onClick={() =>
               onSelectFact(
                 isHighlighted && highlightedFactId === primaryTargetId ? null : primaryTargetId
@@ -339,6 +336,7 @@ export function KundaliSvgChart({
               fill={isHighlighted ? "#E6F4EE" : "transparent"}
               stroke={isHighlighted ? "#1B6B4A" : "#52606D"}
               strokeWidth={isHighlighted ? "2" : "1"}
+              className="group-focus-visible:stroke-[var(--kundali-amber)] group-focus-visible:stroke-2"
             />
             {isLagnaSign ? (
               <line

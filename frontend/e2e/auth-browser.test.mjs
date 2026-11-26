@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { SAMPLE_NORTH_LONDON_CHART_FACTS } from "../src/lib/kundali/sample-north-london.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.resolve(__dirname, "..");
@@ -96,7 +98,7 @@ async function assertResponsiveNoOverflow(page, routeLabel, viewports) {
 
     assert.ok(
       metrics.scrollWidth <= metrics.innerWidth,
-      `${routeLabel} overflow at ${vp.width}x${vp.height}: scrollWidth=${metrics.scrollWidth} > innerWidth=${metrics.innerWidth}`
+      `${routeLabel} overflow at ${vp.width}x${vp.height}: scrollWidth=${metrics.scrollWidth} > innerWidth=${metrics.innerWidth}. Clipped controls: ${JSON.stringify(metrics.clipped)}`
     );
     assert.equal(
       metrics.clipped.length,
@@ -108,6 +110,283 @@ async function assertResponsiveNoOverflow(page, routeLabel, viewports) {
       0,
       `${routeLabel} overlapping controls at ${vp.width}x${vp.height}: ${JSON.stringify(metrics.overlaps)}`
     );
+  }
+}
+
+async function verifyChartWorkspace(browser) {
+  const browserContext = await browser.newContext({ reducedMotion: "reduce" });
+  const page = await browserContext.newPage();
+  page.setDefaultTimeout(10_000);
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const en = JSON.parse(await readFile(path.join(FRONTEND_DIR, "src/i18n/en.json"), "utf8")).userWorkspace;
+  const ne = JSON.parse(await readFile(path.join(FRONTEND_DIR, "src/i18n/ne.json"), "utf8")).userWorkspace;
+  const expires = Math.floor(Date.now() / 1000) + 900;
+  const account = { ...MOCK_USER, email: "chart-verifier@example.invalid" };
+  const revision = "2026-06-01T12:00:00.000001Z";
+  const first = {
+    id: "09b10c29-fc48-4c4e-97c7-da5e010cdf69",
+    owner_id: account.id,
+    label: "Chart verification A",
+    input_calendar: "AD", entered_date: "2015-05-15", date_ad: "2015-05-15",
+    bs_conversion_status: "resolved", time_certainty: "exact", time_local: "14:30:00",
+    place_name: "Test London", latitude: 51.5074, longitude: -0.1278, timezone: "Europe/London",
+    created_at: revision, updated_at: revision,
+  };
+  const second = { ...first, id: "96b360da-58c2-4f1d-80ad-cd23dc99bee8", label: "परीक्षण".repeat(20) };
+  const blocked = [
+    { ...first, id: "091a2cc0-92f1-4915-882e-aa2335b93823", label: "BS pending",
+      input_calendar: "BS", date_ad: null, bs_conversion_status: "awaiting_bs_conversion" },
+    { ...first, id: "091a2cc0-92f1-4915-882e-aa2335b93824", label: "Unknown time",
+      time_certainty: "unknown", time_local: null },
+    { ...first, id: "091a2cc0-92f1-4915-882e-aa2335b93825", label: "Incomplete", date_ad: null },
+  ];
+  let profiles = [first, second, ...blocked];
+  let sessionMode = "active";
+  let refreshes = 0;
+  const requests = [];
+  let respondToChart;
+  const baseSettings = SAMPLE_NORTH_LONDON_CHART_FACTS.settings;
+  const screenshots = process.env.KUNDALI_CHART_SCREENSHOTS;
+  const screenshot = (name) => screenshots && page.screenshot({
+    path: path.join(screenshots, name),
+    fullPage: true,
+    style: "nextjs-portal { display: none }",
+  });
+  if (screenshots) await mkdir(screenshots, { recursive: true });
+  const freshToken = () => makeJwtWithExp(expires + refreshes);
+  const routeSuccess = (route, profile, settings = baseSettings, chartId = "mock-chart-" + "9".repeat(64), source = "mixed") =>
+    route.fulfill({
+      json: {
+        profile_id: profile.id, profile_updated_at: profile.updated_at,
+        input_calendar: profile.input_calendar, time_certainty: profile.time_certainty,
+        chart: {
+          ...SAMPLE_NORTH_LONDON_CHART_FACTS, chart_id: chartId, engine_version: "0.2.0", settings,
+          metadata: { ...SAMPLE_NORTH_LONDON_CHART_FACTS.metadata, ephemeris_source: source },
+        },
+      },
+    });
+  respondToChart = routeSuccess;
+  try {
+    await browserContext.route("**/api/auth/refresh", (route) => {
+      refreshes++;
+      return route.fulfill({
+        json: sessionMode === "active" ? {
+          authenticated: true, user: account, access_token: freshToken(), expires_at: (expires + refreshes) * 1000,
+        } : { authenticated: false },
+      });
+    });
+    await browserContext.route("http://localhost:8000/api/v1/profiles**", async (route) => {
+      const request = route.request();
+      const [, , , , id, action] = new URL(request.url()).pathname.split("/");
+      if (!id) {
+        return route.fulfill({ json: { items: profiles, total: profiles.length, limit: 50, offset: 0 } });
+      }
+      const profile = profiles.find((item) => item.id === id);
+      if (action === "chart") {
+        requests.push({ id, body: request.postDataJSON(), auth: request.headers().authorization });
+        return respondToChart(route, profile);
+      }
+      if (request.method() === "PATCH") {
+        const updated = { ...profile, ...request.postDataJSON(), updated_at: "2026-06-01T12:00:00.000002Z" };
+        profiles = profiles.map((item) => item.id === id ? updated : item);
+        return route.fulfill({ json: updated });
+      }
+      if (request.method() === "DELETE") {
+        profiles = profiles.filter((item) => item.id !== id);
+        return route.fulfill({ status: 204 });
+      }
+      return route.fulfill({ status: 404 });
+    });
+
+    await page.goto(`${TEST_ORIGIN}/user`, { waitUntil: "domcontentloaded" });
+    const profileSelect = page.locator("#active-profile-select");
+    const chart = page.getByRole("img", { name: /Natal Chart/ });
+    const calc = () => page.getByRole("button", { name: en.calculateChart, exact: true });
+    const status = (message) => page.getByText(message, { exact: true }).waitFor({ state: "visible" });
+    const noChart = () => chart.waitFor({ state: "hidden" });
+    const settings = async () => {
+      await page.getByRole("button", { name: en.settingsButton }).click();
+      const dialog = page.getByRole("dialog", { name: en.settingsTitle });
+      await dialog.waitFor();
+      return dialog;
+    };
+    await calc().waitFor();
+    assert.equal(requests.length, 0);
+    await noChart();
+
+    let release;
+    let finished;
+    function holdChartResponse() {
+      let complete;
+      let arrived;
+      const requestArrived = new Promise((resolve) => { arrived = resolve; });
+      finished = new Promise((resolve) => { complete = resolve; });
+      respondToChart = async (route, profile) => {
+        await new Promise((resolve) => { release = resolve; arrived(); });
+        try {
+          await routeSuccess(route, profile, baseSettings, "stale-chart");
+        } finally {
+          complete();
+        }
+      };
+      return requestArrived;
+    }
+
+    const arrived = holdChartResponse();
+    await calc().click();
+    await arrived;
+    await status(en.calculatingChart);
+    await screenshot("chart-loading-en.png");
+    assert.equal(await calc().getAttribute("aria-disabled"), "true");
+    await calc().evaluate((button) => button.click());
+    await profileSelect.selectOption(second.id);
+    await profileSelect.selectOption(first.id);
+    await status(en.readyToCalculate);
+    release();
+    await finished;
+    await noChart();
+    assert.equal(requests.length, 1);
+
+    let didRetry = false;
+    respondToChart = (route, profile) => {
+      if (didRetry) return routeSuccess(route, profile);
+      didRetry = true;
+      return route.fulfill({ status: 401, json: { detail: "mock rejected token" } });
+    };
+    await calc().click();
+    await status(en.chartCalculated);
+    assert.equal(refreshes, 2);
+    assert.notEqual(requests.at(-1).auth, requests.at(-2).auth);
+    assert.deepEqual(requests.at(-1).body, {
+      ayanamsha: "lahiri", node_type: "mean", house_system: "whole_sign", year_days: 365.25,
+    });
+    await status(en.provenanceMixed);
+    assert.match(await chart.getAttribute("aria-label"), /North Indian/);
+    const sun = page.getByRole("row").filter({ hasText: "f_sun" });
+    assert.match(await sun.innerText(), /Taurus/);
+    await sun.focus();
+    await page.keyboard.press("Enter");
+    assert.match(await chart.locator('[aria-pressed="true"]').getAttribute("aria-label"), /House 10.*Sun/);
+    await screenshot("chart-north-en.png");
+    await page.getByRole("button", { name: en.southLabel }).click();
+    assert.match(await chart.getAttribute("aria-label"), /South Indian/);
+    assert.match(await chart.locator('[aria-pressed="true"]').getAttribute("aria-label"), /Taurus.*Sun/);
+
+    const viewports = [
+      { width: 1440, height: 1000 }, { width: 768, height: 1024 },
+      { width: 375, height: 812 }, { width: 320, height: 740 },
+    ];
+    for (const [locale, messages] of [["en", en], ["ne", ne]]) {
+      await page.getByRole("button", { name: locale === "ne" ? "नेपाली" : "EN", exact: true }).click();
+      await status(messages.chartCalculated);
+      assert.equal(await page.locator("div[lang]").first().getAttribute("lang"), locale);
+      await assertResponsiveNoOverflow(page, `/user chart (${locale})`, viewports);
+      const trigger = page.getByRole("button", { name: messages.settingsButton });
+      await trigger.click();
+      const popover = page.getByRole("dialog", { name: messages.settingsTitle });
+      const bounds = await popover.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
+      assert.equal(await popover.getByRole("button", { name: messages.close }).evaluate((el) => el === document.activeElement), true);
+      await page.keyboard.press("Escape");
+      assert.equal(await trigger.evaluate((el) => el === document.activeElement), true);
+      if (screenshots) {
+        for (const viewport of viewports) {
+          await page.setViewportSize(viewport);
+          await screenshot(`chart-${locale}-${viewport.width}.png`);
+        }
+      }
+    }
+
+    await page.getByRole("button", { name: "EN", exact: true }).click();
+    const beforeYear = requests.length;
+    let dialog = await settings();
+    await dialog.locator("#calc-year-days").selectOption("360");
+    await dialog.getByRole("button", { name: en.applySettings }).click();
+    await status(en.dashaOnlyNotice);
+    await chart.waitFor();
+    assert.equal(requests.length, beforeYear);
+    await profileSelect.selectOption(second.id);
+    const settingsArrival = holdChartResponse();
+    await calc().click();
+    await settingsArrival;
+    dialog = await settings();
+    await dialog.getByRole("button", { name: en.presetHamro }).click();
+    await dialog.getByRole("button", { name: en.applySettings }).click();
+    release();
+    await finished;
+    await status(en.readyToCalculate);
+    await noChart();
+    assert.equal(await page.getByText(/stale-chart/).count(), 0);
+
+    const preset = { ...baseSettings, ayanamsha: "lahiri_1940", node_type: "true", preset: "hamro_patro_compat" };
+    respondToChart = (route, profile) => routeSuccess(route, profile, preset, "preset-chart", "moshier");
+    await calc().click();
+    await status(en.provenanceMoshier);
+    assert.deepEqual(requests.at(-1).body, { preset: "hamro_patro_compat", year_days: 365.25 });
+    await page.getByRole("button", { name: en.editProfileButton }).click();
+    await page.getByRole("button", { name: en.editFormSubmit }).click();
+    await status(en.profileUpdatedNotice);
+    await noChart();
+    await calc().click();
+    await status(en.chartCalculated);
+    await page.getByRole("button", { name: en.deleteProfileButton }).click();
+    await page.getByRole("button", { name: en.deleteConfirmButton, exact: true }).click();
+    await status(en.profileDeletedNotice);
+    await noChart();
+
+    const beforeBlocked = requests.length;
+    for (const [index, issue] of ["bsPending", "unknownTime", "incomplete"].entries()) {
+      await profileSelect.selectOption(blocked[index].id);
+      await status(en.chartIssues[issue]);
+      assert.equal(await calc().count(), 0);
+    }
+    assert.equal(requests.length, beforeBlocked);
+    await profileSelect.selectOption(first.id);
+    respondToChart = (route) => route.abort("failed");
+    await calc().click();
+    await status(en.chartIssues.network);
+    await page.getByRole("button", { name: "नेपाली", exact: true }).click();
+    await status(ne.chartIssues.network);
+    respondToChart = (route) => route.fulfill({
+      status: 409, json: { code: "CHART_DATE_OUT_OF_RANGE", detail: "private backend diagnostic" },
+    });
+    await page.getByRole("button", { name: ne.retryChart }).click();
+    await status(ne.chartIssues.dateRange);
+    assert.equal(await page.getByText("private backend diagnostic").count(), 0);
+    await screenshot("chart-error-ne-320.png");
+
+    await page.getByRole("button", { name: "EN", exact: true }).click();
+    const beforeSample = requests.length;
+    await page.getByRole("button", { name: en.syntheticPreviewButton, exact: true }).click();
+    await status(en.sampleBannerTitle);
+    assert.equal(requests.length, beforeSample);
+    await profileSelect.selectOption(first.id);
+    await noChart();
+    assert.equal(await page.getByText(en.sampleBannerTitle, { exact: true }).count(), 0);
+
+    respondToChart = (route, profile) => routeSuccess(route, { ...profile, updated_at: "2026-06-03T12:00:00Z" });
+    await calc().click();
+    await status(en.chartIssues.profileChanged);
+    await noChart();
+    await page.getByRole("button", { name: en.reloadChartProfiles }).click();
+    await status(en.readyToCalculate);
+
+    respondToChart = routeSuccess;
+    await calc().click();
+    await status(en.chartCalculated);
+    sessionMode = "expired";
+    respondToChart = (route) => route.fulfill({ status: 401, json: {} });
+    await page.getByRole("button", { name: en.recalculateChart }).click();
+    await status(en.authRequiredBannerTitle);
+    await status(en.sampleBannerTitle);
+    assert.equal(await page.getByText(/mock-chart-/).count(), 0);
+    assert.equal(refreshes, 3);
+    assert.deepEqual(await page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)]), []);
+    assert.deepEqual(errors, []);
+    console.log("Mocked chart API: verified both locales at 1440, 768, 375 and 320px.");
+  } finally {
+    await browserContext.close();
   }
 }
 
@@ -599,6 +878,7 @@ async function runTests() {
       await context.close();
     }
 
+    await verifyChartWorkspace(browser);
     console.log("ALL PLAYWRIGHT E2E CHROMIUM CHECKS PASSED.");
   } finally {
     if (browser) {
