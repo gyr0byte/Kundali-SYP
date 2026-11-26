@@ -51,5 +51,14 @@ htmlcov/
 
 # === Local Agent Skill Installations ===
 .agent/
+.agents/skills/break-ui/
 .agents/skills/design-taste-frontend/
+.agents/skills/emil-design-eng/
+.agents/skills/landing-page-design/
+.agents/skills/learn-taste/
+.agents/skills/playwright-cli/
+.agents/skills/vercel-react-best-practices/
+.agents/skills/web-design-guidelines/
 skills-lock.json
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
