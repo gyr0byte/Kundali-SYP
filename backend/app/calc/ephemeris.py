@@ -6,8 +6,10 @@ Enforces thread safety under SWE_LOCK to prevent global sidereal mode leakage.
 
 from __future__ import annotations
 
-from ctypes import c_double, create_string_buffer
+import math
+from ctypes import Array, c_char, c_double, create_string_buffer
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 from swisseph_ffi import (  # type: ignore[import-untyped]
@@ -20,13 +22,23 @@ from swisseph_ffi import (  # type: ignore[import-untyped]
     SE_SUN,
     SE_TRUE_NODE,
     SE_VENUS,
-    SEFLG_MOSEPH,
     SEFLG_SIDEREAL,
     SEFLG_SPEED,
     SEFLG_SWIEPH,
+    SwissEph,
 )
 
-from app.calc.ayanamsha import _SIDM_MAP, SWE_LOCK, AyanamshaMode, get_swe_engine
+from app.calc.ayanamsha import (
+    _SIDM_MAP,
+    SWE_LOCK,
+    AyanamshaMode,
+    CalculationError,
+    classify_ephemeris_flag,
+    get_swe_engine,
+)
+from app.calc.houses import normalize_longitude
+
+EphemerisSource = Literal["swieph", "moshier", "mixed"]
 
 
 class NodeType(StrEnum):
@@ -53,7 +65,7 @@ class EphemerisResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     positions: dict[str, PlanetPosition]
-    ephemeris_source: str  # "swieph" or "moshier"
+    ephemeris_source: EphemerisSource
 
 
 _PLANET_BODIES = [
@@ -67,6 +79,46 @@ _PLANET_BODIES = [
 ]
 
 
+def _resolve_overall_ephemeris_source(
+    sources: set[Literal["swieph", "moshier"]],
+) -> EphemerisSource:
+    """Aggregate per-body provenance without hiding partial Moshier fallbacks."""
+    if sources == {"swieph"}:
+        return "swieph"
+    if sources == {"moshier"}:
+        return "moshier"
+    if sources == {"swieph", "moshier"}:
+        return "mixed"
+    raise CalculationError("Unable to determine valid ephemeris provenance.")
+
+
+def _calc_single_body(
+    swe: SwissEph,
+    jd: float,
+    pid: int,
+    flags: int,
+    body_name: str,
+    xx: Array[c_double],
+    serr: Array[c_char],
+) -> tuple[float, float, Literal["swieph", "moshier"]]:
+    """Query one body under active SWE_LOCK and fail closed on invalid output."""
+    try:
+        iflag = int(swe.swe_calc_ut(c_double(jd), pid, flags, xx, serr))
+    except Exception as exc:
+        raise CalculationError(
+            f"Swiss Ephemeris calculation raised an error for {body_name}."
+        ) from exc
+
+    source = classify_ephemeris_flag(iflag, subject=body_name)
+
+    raw_lon = float(xx[0])
+    speed = float(xx[3])
+    if not math.isfinite(raw_lon) or not math.isfinite(speed):
+        raise CalculationError(f"Swiss Ephemeris returned non-finite output for {body_name}.")
+
+    return normalize_longitude(raw_lon), speed, source
+
+
 def calculate_positions(
     jd: float,
     ayanamsha: AyanamshaMode = AyanamshaMode.LAHIRI,
@@ -76,7 +128,10 @@ def calculate_positions(
 
     Thread-safe: sets sid_mode and queries positions under SWE_LOCK.
     """
-    swe = get_swe_engine()
+    if isinstance(jd, bool) or not isinstance(jd, (int, float)) or not math.isfinite(float(jd)):
+        raise CalculationError("Julian Day must be a finite numeric value.")
+
+    jd_float = float(jd)
     sid_mode = _SIDM_MAP[ayanamsha]
     flags = SEFLG_SWIEPH | SEFLG_SPEED | SEFLG_SIDEREAL
 
@@ -84,25 +139,22 @@ def calculate_positions(
     serr = create_string_buffer(256)
 
     positions: dict[str, PlanetPosition] = {}
-    ephemeris_sources: set[str] = set()
+    ephemeris_sources: set[Literal["swieph", "moshier"]] = set()
 
     with SWE_LOCK:
-        swe.swe_set_sid_mode(sid_mode, 0, 0)
+        swe = get_swe_engine()
+        try:
+            swe.swe_set_sid_mode(sid_mode, 0, 0)
+        except Exception as exc:
+            raise CalculationError("Failed to configure sidereal mode.") from exc
 
         # 7 Classical planets
         for name, pid in _PLANET_BODIES:
-            iflag = swe.swe_calc_ut(c_double(jd), pid, flags, xx, serr)
-            lon = xx[0] % 360.0
-            speed = xx[3]
-
-            if iflag & SEFLG_SWIEPH:
-                ephemeris_sources.add("swieph")
-            elif iflag & SEFLG_MOSEPH:
-                ephemeris_sources.add("moshier")
+            lon, speed, source = _calc_single_body(swe, jd_float, pid, flags, name, xx, serr)
+            ephemeris_sources.add(source)
 
             # Sun and Moon are never retrograde
-            retrograde = speed < 0 if name not in ("sun", "moon") else False
-
+            retrograde = speed < 0.0 if name not in ("sun", "moon") else False
             positions[name] = PlanetPosition(
                 name=name,
                 longitude=lon,
@@ -112,14 +164,10 @@ def calculate_positions(
 
         # Rahu (Mean or True node)
         node_id = SE_MEAN_NODE if node_type == NodeType.MEAN else SE_TRUE_NODE
-        iflag = swe.swe_calc_ut(c_double(jd), node_id, flags, xx, serr)
-        rahu_lon = xx[0] % 360.0
-        rahu_speed = xx[3]
-
-        if iflag & SEFLG_SWIEPH:
-            ephemeris_sources.add("swieph")
-        elif iflag & SEFLG_MOSEPH:
-            ephemeris_sources.add("moshier")
+        rahu_lon, rahu_speed, node_source = _calc_single_body(
+            swe, jd_float, node_id, flags, "rahu", xx, serr
+        )
+        ephemeris_sources.add(node_source)
 
         # Rahu is always flagged retrograde in Vedic astrology
         positions["rahu"] = PlanetPosition(
@@ -130,7 +178,7 @@ def calculate_positions(
         )
 
         # Ketu = Rahu + 180° (mod 360), always retrograde
-        ketu_lon = (rahu_lon + 180.0) % 360.0
+        ketu_lon = normalize_longitude(rahu_lon + 180.0)
         positions["ketu"] = PlanetPosition(
             name="ketu",
             longitude=ketu_lon,
@@ -138,12 +186,7 @@ def calculate_positions(
             retrograde=True,
         )
 
-    # Determine overall ephemeris source
-    if "swieph" in ephemeris_sources:
-        source = "swieph"
-    elif "moshier" in ephemeris_sources:
-        source = "moshier"
-    else:
-        source = "unknown"
-
-    return EphemerisResult(positions=positions, ephemeris_source=source)
+    return EphemerisResult(
+        positions=positions,
+        ephemeris_source=_resolve_overall_ephemeris_source(ephemeris_sources),
+    )

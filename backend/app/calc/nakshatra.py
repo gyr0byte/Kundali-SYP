@@ -6,6 +6,8 @@ and 108 padas (quarters, 3° 20' each).
 
 from __future__ import annotations
 
+from app.calc.houses import normalize_longitude
+
 NAKSHATRA_NAMES: list[str] = [
     "Ashwini",
     "Bharani",
@@ -45,9 +47,7 @@ def nakshatra_of(longitude: float) -> tuple[int, str, int]:
 
     Handles boundary points at 0.0° and 359.999° with floating-point stability.
     """
-    normalized_lon = longitude % 360.0
-    if normalized_lon < 0.0:
-        normalized_lon += 360.0
+    normalized_lon = normalize_longitude(longitude)
 
     idx = int(normalized_lon / NAKSHATRA_SPAN)
     if idx >= 27:
