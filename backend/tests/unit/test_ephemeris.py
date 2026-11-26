@@ -22,7 +22,7 @@ from swisseph_ffi import (  # type: ignore[import-untyped]
 import app.calc.ayanamsha as ayanamsha_mod
 import app.calc.ephemeris as ephemeris_mod
 from app.calc.ayanamsha import AyanamshaMode, CalculationError
-from app.calc.ephemeris import NodeType, calculate_positions
+from app.calc.ephemeris import EphemerisDateRangeError, NodeType, calculate_positions
 
 
 def test_ketu_opposite_rahu() -> None:
@@ -108,6 +108,49 @@ def test_ephemeris_mixed_provenance_and_auxiliary_flags_via_mock(
     monkeypatch.setattr(ephemeris_mod, "get_swe_engine", lambda: _FakeSweMixed())
     res = calculate_positions(2451545.0)
     assert res.ephemeris_source == "mixed"
+    assert res.body_sources["moon"] == "moshier"
+    assert res.body_sources["sun"] == "swieph"
+    assert res.body_sources["ketu"] == res.body_sources["rahu"]
+
+
+@pytest.mark.parametrize(
+    ("jd", "message", "error_type"),
+    [
+        (2818000.45, b"SwissEph file 'sepl_30.se1' not found in PATH '/data'", CalculationError),
+        (
+            2818000.48,
+            b"SwissEph file 'sepl_30.se1' not found in PATH '/data'",
+            EphemerisDateRangeError,
+        ),
+        (
+            2818000.48,
+            b"planets eph. file (sepl_30.se1): jd > upper limit xyz;",
+            EphemerisDateRangeError,
+        ),
+        (2818000.48, b"jd 2818000.52 outside Moshier planet range", EphemerisDateRangeError),
+        (2818000.48, b"damaged ephemeris file", CalculationError),
+    ],
+)
+def test_ephemeris_distinguishes_date_coverage_from_native_failure(
+    monkeypatch: pytest.MonkeyPatch, jd: float, message: bytes, error_type: type[CalculationError]
+) -> None:
+    class _FakeSwe:
+        def swe_set_sid_mode(self, _sid: int, _t0: float, _ayan_t0: float) -> None:
+            pass
+
+        def swe_calc_ut(self, _jd: Any, _pid: int, _flags: int, _xx: Any, serr: Any) -> int:
+            serr.value = message
+            return -1
+
+        def swe_deltat_ex(self, _jd: Any, _flags: int, _serr: Any) -> float:
+            return 0.04
+
+    monkeypatch.setattr(ephemeris_mod, "get_swe_engine", _FakeSwe)
+    with pytest.raises(error_type) as failure:
+        calculate_positions(jd)
+
+    assert type(failure.value) is error_type
+    assert message.decode() not in str(failure.value)
 
 
 def test_ephemeris_swieph_and_moshier_auxiliary_flags_explicit(

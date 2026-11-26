@@ -12,6 +12,7 @@ import pytest
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
+import app.calc.facts as facts_mod
 import app.services.chart_service as chart_service_mod
 from app.api.schemas.chart import ChartCalculationRequest, ChartCalculationResponse
 from app.calc.ayanamsha import AyanamshaMode, CalculationError
@@ -37,7 +38,6 @@ from app.services.chart_service import (
     ChartCalculationFailureError,
     ChartProfileConflictError,
     ChartTimeInputError,
-    build_deterministic_chart_id,
     calculate_profile_chart,
 )
 from app.services.profile_service import (
@@ -172,66 +172,42 @@ def test_decrypt_profile_calc_inputs_minimality_and_ownership(test_settings: Set
 
 
 def test_deterministic_chart_id_includes_engine_version_and_settings(
+    test_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """chart_id stays deterministic yet changes with ENGINE_VERSION, updated_at, and settings."""
-    pid = uuid.UUID("11111111-1111-1111-1111-111111111111")
-    ts1 = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.UTC)
-    ts1_naive = datetime.datetime(2026, 1, 1, 12, 0)
-    ts2 = datetime.datetime(2026, 1, 1, 12, 1, tzinfo=datetime.UTC)
+    """Chart identity follows the result instead of the profile or its storage metadata."""
+    owner = uuid.uuid4()
+    profile = _make_profile(owner_id=owner)
+
+    def calculate(settings: ChartSettings) -> ChartFacts:
+        return calculate_profile_chart(
+            profile, owner_id=owner, calc_settings=settings, app_settings=test_settings
+        ).chart
 
     base = ChartSettings()
-    id_a = build_deterministic_chart_id(profile_id=pid, profile_updated_at=ts1, settings=base)
-    id_a_naive = build_deterministic_chart_id(
-        profile_id=pid, profile_updated_at=ts1_naive, settings=base
-    )
-    assert id_a.startswith("c_") and len(id_a) == 18
-    assert id_a == id_a_naive
+    baseline = calculate(base)
+    assert baseline.chart_id.startswith("c_") and len(baseline.chart_id) == 34
+    assert calculate(base) == baseline
 
-    assert (
-        build_deterministic_chart_id(
-            profile_id=pid,
-            profile_updated_at=ts1,
-            settings=base,
-            engine_version="9.9.9",
-        )
-        != id_a
-    )
-    assert (
-        build_deterministic_chart_id(profile_id=pid, profile_updated_at=ts2, settings=base) != id_a
-    )
-    assert (
-        build_deterministic_chart_id(
-            profile_id=pid,
-            profile_updated_at=ts1,
-            settings=ChartSettings(year_days=360.0),
-        )
-        != id_a
-    )
-    assert (
-        build_deterministic_chart_id(
-            profile_id=pid,
-            profile_updated_at=ts1,
-            settings=ChartSettings(ayanamsha=AyanamshaMode.RAMAN),
-        )
-        != id_a
-    )
+    profile.updated_at = profile.updated_at.replace(tzinfo=None)
+    assert calculate(base) == baseline
+    profile.updated_at += datetime.timedelta(minutes=1)
+    profile.id = uuid.uuid4()
+    profile.label_enc = encrypt_text("Renamed profile", TEST_ENCRYPTION_KEY)
+    assert calculate(base) == baseline
 
-    # Confirm engine version bump via module attribute propagates to service chart_id
-    monkeypatch.setattr(chart_service_mod, "ENGINE_VERSION", "0.2.99")
-    owner = uuid.uuid4()
-    profile = _make_profile(owner_id=owner, updated_at=ts1)
-    settings_obj = Settings(
-        ENVIRONMENT="test",
-        JWT_SECRET="x" * 32,
-        DATABASE_URL="sqlite:///:memory:",
-        ENCRYPTION_KEY=TEST_ENCRYPTION_KEY,
-    )
-    res_bumped = calculate_profile_chart(
-        profile, owner_id=owner, calc_settings=base, app_settings=settings_obj
-    )
-    assert res_bumped.chart.chart_id != id_a
-    assert res_bumped.chart.engine_version == ENGINE_VERSION
+    assert calculate(ChartSettings(year_days=360.0)).chart_id != baseline.chart_id
+    assert calculate(ChartSettings(ayanamsha=AyanamshaMode.RAMAN)).chart_id != baseline.chart_id
+
+    profile.time_local_enc = encrypt_optional_text("08:40", TEST_ENCRYPTION_KEY)
+    assert calculate(base).chart_id != baseline.chart_id
+    profile.time_local_enc = encrypt_optional_text("08:30", TEST_ENCRYPTION_KEY)
+
+    monkeypatch.setattr(facts_mod, "ENGINE_VERSION", "0.2.99")
+    bumped = calculate(base)
+    assert bumped.chart_id != baseline.chart_id
+    assert bumped.engine_version == "0.2.99"
+    assert bumped.facts == baseline.facts
 
 
 def test_service_blocks_bs_unknown_and_incomplete_profiles_without_calc(
@@ -363,10 +339,10 @@ def test_service_preserves_provenance_and_approximate_certainty(
     owner = uuid.uuid4()
     profile = _make_profile(owner_id=owner, time_certainty=TimeCertainty.APPROXIMATE)
 
-    def _fake_facts(birth_input: TimeInput, settings: ChartSettings, chart_id: str) -> ChartFacts:
+    def _fake_facts(birth_input: TimeInput, settings: ChartSettings) -> ChartFacts:
         assert birth_input.timezone == "Asia/Kathmandu"
         return ChartFacts(
-            chart_id=chart_id,
+            chart_id="c_test_provenance",
             engine_version=ENGINE_VERSION,
             settings=settings,
             metadata=ChartMetadata(

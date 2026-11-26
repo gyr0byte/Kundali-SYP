@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Response, status
@@ -26,8 +27,18 @@ from app.services.chart_service import (
 from app.services.profile_service import ProfileStorageError
 
 router = APIRouter(tags=["charts"])
+logger = logging.getLogger(__name__)
 
 _NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+
+
+def _internal_failure(category: str) -> JSONResponse:
+    logger.error("Chart calculation failed: %s", category)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Unable to compute birth chart"},
+        headers=_NO_STORE_HEADERS,
+    )
 
 
 @router.post(
@@ -48,13 +59,12 @@ def compute_profile_chart_endpoint(
 ) -> ChartCalculationResponse | Response:
     """Compute a deterministic Vedic chart for an owned, calculation-eligible birth profile."""
     profile = get_owned_or_404(BirthProfile, profile_id, current_user.id, db)
-    calc_settings = req.to_chart_settings()
 
     try:
         result = calculate_profile_chart(
             profile,
             owner_id=current_user.id,
-            calc_settings=calc_settings,
+            calc_settings=req.to_chart_settings(),
             app_settings=app_settings,
         )
     except ChartProfileConflictError as exc:
@@ -64,6 +74,7 @@ def compute_profile_chart_endpoint(
             headers=_NO_STORE_HEADERS,
         )
     except ChartTimeInputError as exc:
+        logger.warning("Chart calculation failed: time_conversion")
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
@@ -78,12 +89,12 @@ def compute_profile_chart_endpoint(
             },
             headers=_NO_STORE_HEADERS,
         )
-    except (ProfileStorageError, ChartCalculationFailureError, Exception):
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "Unable to compute birth chart"},
-            headers=_NO_STORE_HEADERS,
-        )
+    except ProfileStorageError:
+        return _internal_failure("profile_decryption")
+    except ChartCalculationFailureError as exc:
+        return _internal_failure(exc.category)
+    except Exception:
+        return _internal_failure("unexpected")
 
     response.headers["Cache-Control"] = "no-store"
     return result

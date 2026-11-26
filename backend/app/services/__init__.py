@@ -22,7 +22,6 @@ from app.services.chart_service import (
     ChartCalculationFailureError,
     ChartProfileConflictError,
     ChartTimeInputError,
-    build_deterministic_chart_id,
     calculate_profile_chart,
 )
 from app.services.profile_service import (
@@ -48,7 +47,6 @@ __all__ = [
     "apply_for_astrologer",
     "approve_astrologer",
     "authenticate_user",
-    "build_deterministic_chart_id",
     "calculate_profile_chart",
     "change_password",
     "create_profile",

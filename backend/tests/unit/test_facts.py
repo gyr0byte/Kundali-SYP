@@ -14,7 +14,13 @@ import pytest
 import app.calc.ayanamsha as ayanamsha_mod
 import app.calc.facts as facts_mod
 from app.calc.ayanamsha import SWE_LOCK, AyanamshaMode
-from app.calc.ephemeris import EphemerisResult, NodeType, PlanetPosition
+from app.calc.ephemeris import (
+    BodyEphemerisSource,
+    EphemerisResult,
+    EphemerisSource,
+    NodeType,
+    PlanetPosition,
+)
 from app.calc.facts import (
     ENGINE_VERSION,
     ChartFactLagna,
@@ -208,7 +214,9 @@ def test_quantized_cusp_rounding_keeps_sign_degree_house_sensitivity_consistent(
         facts_mod,
         "calculate_positions",
         lambda *_args, **_kwargs: EphemerisResult(
-            positions=raw_positions, ephemeris_source="swieph"
+            positions=raw_positions,
+            ephemeris_source="swieph",
+            body_sources=dict.fromkeys(raw_positions, "swieph"),
         ),
     )
 
@@ -243,6 +251,63 @@ def test_quantized_cusp_rounding_keeps_sign_degree_house_sensitivity_consistent(
     sens = next(f for f in doc.facts if isinstance(f, ChartFactSensitivity))
     assert sens.degree_in_sign == 0.0
     assert sens.boundary_distance_degrees == 0.0
+
+
+def test_result_identity_canonicalizes_body_sources_and_covers_final_facts(
+    sample_birth_input: TimeInput, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Frozen positions isolate identity semantics from installed ephemeris files."""
+    positions = {
+        name: PlanetPosition(name=name, longitude=longitude, speed=0.5, retrograde=False)
+        for name, longitude in (
+            ("sun", 105.0),
+            ("moon", 189.0),
+            ("mars", 140.0),
+            ("mercury", 94.0),
+            ("jupiter", 242.0),
+            ("venus", 175.0),
+            ("saturn", 121.0),
+            ("rahu", 328.0),
+            ("ketu", 148.0),
+        )
+    }
+    monkeypatch.setattr(facts_mod, "compute_lagna", lambda *_args: 115.0)
+
+    def calculate(
+        source: EphemerisSource,
+        body_sources: dict[str, BodyEphemerisSource],
+        birth: TimeInput = sample_birth_input,
+    ) -> str:
+        result = EphemerisResult(
+            positions=positions, ephemeris_source=source, body_sources=body_sources
+        )
+        monkeypatch.setattr(facts_mod, "calculate_positions", lambda *_args, **_kwargs: result)
+        return compute_chart_facts(birth, ChartSettings()).chart_id
+
+    swieph: dict[str, BodyEphemerisSource] = dict.fromkeys(positions, "swieph")
+    moshier: dict[str, BodyEphemerisSource] = dict.fromkeys(positions, "moshier")
+    mixed = swieph | {"sun": "moshier"}
+    other_mixed = swieph | {"moon": "moshier"}
+    baseline = calculate("swieph", swieph)
+
+    assert calculate("swieph", dict(reversed(list(swieph.items())))) == baseline
+    assert (
+        len(
+            {
+                baseline,
+                calculate("moshier", moshier),
+                calculate("mixed", mixed),
+                calculate("mixed", other_mixed),
+            }
+        )
+        == 4
+    )
+
+    shifted_location = sample_birth_input.model_copy(update={"latitude": 26.4500001})
+    assert calculate("swieph", swieph, shifted_location) != baseline
+
+    positions["sun"] = positions["sun"].model_copy(update={"longitude": 105.002})
+    assert calculate("swieph", swieph) != baseline
 
 
 def test_compute_chart_facts_propagates_swieph_moshier_and_mixed_provenance(

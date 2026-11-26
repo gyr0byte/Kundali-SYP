@@ -39,7 +39,16 @@ from app.calc.ayanamsha import (
 )
 from app.calc.houses import normalize_longitude
 
+BodyEphemerisSource = Literal["swieph", "moshier"]
 EphemerisSource = Literal["swieph", "moshier", "mixed"]
+# Swiss Ephemeris sweph.h uses these TT bounds for planet and Moon fallback.
+_MOSHIER_START_TT = 625000.5
+_MOSHIER_END_TT = 2818000.5
+
+
+class EphemerisDateRangeError(CalculationError):
+    """The installed ephemeris and native fallback cannot cover the requested instant."""
+
 
 # Auxiliary flags returned by Swiss Ephemeris for sidereal speed calculations.
 PLANETARY_AUXILIARY_FLAGS: int = SEFLG_SPEED | SEFLG_SIDEREAL | SEFLG_NONUT
@@ -70,6 +79,7 @@ class EphemerisResult(BaseModel):
 
     positions: dict[str, PlanetPosition]
     ephemeris_source: EphemerisSource
+    body_sources: dict[str, BodyEphemerisSource]
 
 
 _PLANET_BODIES = [
@@ -84,7 +94,7 @@ _PLANET_BODIES = [
 
 
 def _resolve_overall_ephemeris_source(
-    sources: set[Literal["swieph", "moshier"]],
+    sources: set[BodyEphemerisSource],
 ) -> EphemerisSource:
     """Aggregate per-body provenance without hiding partial Moshier fallbacks."""
     if sources == {"swieph"}:
@@ -96,6 +106,29 @@ def _resolve_overall_ephemeris_source(
     raise CalculationError("Unable to determine valid ephemeris provenance.")
 
 
+def _is_date_range_failure(swe: SwissEph, jd: float, flags: int, message: bytes) -> bool:
+    """Recognize coverage errors without retaining native diagnostics or file paths."""
+    if message.startswith(b"jd ") and any(
+        marker in message
+        for marker in (
+            b"outside Moshier planet range",
+            b"outside Moshier's Moon range",
+            b"outside mean node range",
+        )
+    ):
+        return True
+
+    missing_file = message.startswith(b"SwissEph file '") and b".se1' not found in PATH" in message
+    file_limit = message.startswith((b"planets eph. file (", b"moon eph. file (")) and (
+        b" < lower limit " in message or b" > upper limit " in message
+    )
+    # Without Swiss coverage, the library only tries Moshier inside its TT interval.
+    if missing_file or file_limit:
+        jd_tt = jd + float(swe.swe_deltat_ex(c_double(jd), flags, None))
+        return jd_tt <= _MOSHIER_START_TT or jd_tt >= _MOSHIER_END_TT
+    return False
+
+
 def _calc_single_body(
     swe: SwissEph,
     jd: float,
@@ -104,14 +137,19 @@ def _calc_single_body(
     body_name: str,
     xx: Array[c_double],
     serr: Array[c_char],
-) -> tuple[float, float, Literal["swieph", "moshier"]]:
+) -> tuple[float, float, BodyEphemerisSource]:
     """Query one body under active SWE_LOCK and fail closed on invalid output."""
+    serr.value = b""
     try:
         iflag = int(swe.swe_calc_ut(c_double(jd), pid, flags, xx, serr))
+        out_of_range = iflag == -1 and _is_date_range_failure(swe, jd, flags, serr.value)
     except Exception as exc:
         raise CalculationError(
             f"Swiss Ephemeris calculation raised an error for {body_name}."
         ) from exc
+
+    if out_of_range:
+        raise EphemerisDateRangeError("Date is outside the configured ephemeris coverage.")
 
     source = classify_ephemeris_flag(
         iflag,
@@ -147,7 +185,7 @@ def calculate_positions(
     serr = create_string_buffer(256)
 
     positions: dict[str, PlanetPosition] = {}
-    ephemeris_sources: set[Literal["swieph", "moshier"]] = set()
+    body_sources: dict[str, BodyEphemerisSource] = {}
 
     with SWE_LOCK:
         swe = get_swe_engine()
@@ -159,7 +197,7 @@ def calculate_positions(
         # 7 Classical planets
         for name, pid in _PLANET_BODIES:
             lon, speed, source = _calc_single_body(swe, jd_float, pid, flags, name, xx, serr)
-            ephemeris_sources.add(source)
+            body_sources[name] = source
 
             # Sun and Moon are never retrograde
             retrograde = speed < 0.0 if name not in ("sun", "moon") else False
@@ -175,7 +213,7 @@ def calculate_positions(
         rahu_lon, rahu_speed, node_source = _calc_single_body(
             swe, jd_float, node_id, flags, "rahu", xx, serr
         )
-        ephemeris_sources.add(node_source)
+        body_sources.update(rahu=node_source, ketu=node_source)
 
         # Rahu is always flagged retrograde in Vedic astrology
         positions["rahu"] = PlanetPosition(
@@ -196,5 +234,6 @@ def calculate_positions(
 
     return EphemerisResult(
         positions=positions,
-        ephemeris_source=_resolve_overall_ephemeris_source(ephemeris_sources),
+        ephemeris_source=_resolve_overall_ephemeris_source(set(body_sources.values())),
+        body_sources=body_sources,
     )

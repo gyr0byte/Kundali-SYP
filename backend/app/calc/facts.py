@@ -6,13 +6,15 @@ Kundali_Project_Plan.md §8.9. This module NEVER imports from app.ai.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.calc.ayanamsha import SWE_LOCK, AyanamshaMode, CalculationError
-from app.calc.ephemeris import EphemerisSource, NodeType, calculate_positions
+from app.calc.ephemeris import BodyEphemerisSource, EphemerisSource, NodeType, calculate_positions
 from app.calc.houses import (
     compute_lagna,
     degree_in_sign,
@@ -168,6 +170,9 @@ class ChartFactSensitivity(BaseModel):
     note: str
 
 
+ChartFact = ChartFactLagna | ChartFactPlacement | ChartFactSensitivity
+
+
 class ChartFacts(BaseModel):
     """Complete, immutable chart facts document for a single nativity."""
 
@@ -177,7 +182,7 @@ class ChartFacts(BaseModel):
     engine_version: str
     settings: ChartSettings
     metadata: ChartMetadata
-    facts: list[ChartFactLagna | ChartFactPlacement | ChartFactSensitivity]
+    facts: list[ChartFact]
 
 
 _PLANET_NAMES_DISPLAY = [
@@ -205,19 +210,45 @@ def _quantized_body_geometry(raw_longitude: float) -> tuple[float, int, str, flo
     return q_lon, s_idx, s_name, deg, nak_name, pada
 
 
+def _build_result_chart_id(
+    *,
+    settings: ChartSettings,
+    metadata: ChartMetadata,
+    facts: list[ChartFact],
+    latitude: float,
+    longitude: float,
+    body_sources: dict[str, BodyEphemerisSource],
+) -> str:
+    """Hash effective calculation inputs, final chart facts, and native body provenance."""
+    payload = {
+        "identity_version": 1,
+        "engine_version": ENGINE_VERSION,
+        "settings": settings.model_dump(mode="json"),
+        "metadata": metadata.model_dump(mode="json"),
+        "facts": [fact.model_dump(mode="json") for fact in facts],
+        "latitude": latitude,
+        "longitude": longitude,
+        "body_sources": body_sources,
+    }
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
+    return f"c_{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:32]}"
+
+
 def compute_chart_facts(
     birth_input: TimeInput,
     settings: ChartSettings,
-    chart_id: str,
+    chart_id: str | None = None,
 ) -> ChartFacts:
     """Compute pure, deterministic Chart Facts for a birth input and settings.
 
     Identical inputs produce byte-identical JSON. Does not use current time.
+    When no explicit identifier is supplied, derive one from the calculated result.
     Holds SWE_LOCK across the complete calculation pipeline so shared C library
     state stays atomic across Lagna and planetary evaluations.
     """
-    clean_chart_id = chart_id.strip() if isinstance(chart_id, str) else ""
-    if not clean_chart_id:
+    if chart_id is not None and (not isinstance(chart_id, str) or not chart_id.strip()):
         raise ValueError("chart_id must be a non-empty string.")
 
     with SWE_LOCK:
@@ -243,7 +274,7 @@ def compute_chart_facts(
     )
 
     # 2. Quantized Planetary Placements referencing quantized Lagna
-    facts_list: list[ChartFactLagna | ChartFactPlacement | ChartFactSensitivity] = [lagna_fact]
+    facts_list: list[ChartFact] = [lagna_fact]
 
     for key, display_name in _PLANET_NAMES_DISPLAY:
         pos = eph_res.positions[key]
@@ -293,8 +324,17 @@ def compute_chart_facts(
         datetime_utc_iso=time_ctx.datetime_utc.isoformat(),
     )
 
+    if chart_id is None:
+        chart_id = _build_result_chart_id(
+            settings=settings,
+            metadata=meta,
+            facts=facts_list,
+            latitude=time_ctx.latitude,
+            longitude=time_ctx.longitude,
+            body_sources=eph_res.body_sources,
+        )
     return ChartFacts(
-        chart_id=clean_chart_id,
+        chart_id=chart_id.strip(),
         engine_version=ENGINE_VERSION,
         settings=settings,
         metadata=meta,

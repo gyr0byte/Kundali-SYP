@@ -34,7 +34,7 @@ under SWE_LOCK             Retrograde & Speed flags         under SWE_LOCK
                             Construct Immutable ChartFacts Document
                             - Stable fact IDs (f_lagna, f_sun..f_ketu)
                             - Boundary sensitivity flag (f_lagna_sensitivity)
-                            - Ephemeris source provenance ("swieph" | "moshier")
+                            - Ephemeris source provenance ("swieph" | "moshier" | "mixed")
 ```
 
 ---
@@ -49,7 +49,7 @@ under SWE_LOCK             Retrograde & Speed flags         under SWE_LOCK
    * Ketu is strictly computed as $(Rahu + 180^\circ) \pmod{360^\circ}$.
    * Both nodes are always flagged as retrograde.
 4. **Presets:** A documented `"hamro_patro_compat"` preset is available (`node_type: TRUE`, `ayanamsha: LAHIRI_1940`), but default remains standard Lahiri and Mean Node.
-5. **Ephemeris Data Files:** Swiss Ephemeris .se1 data files from the official repository (`sepl_18.se1`, `semo_18.se1`, `seas_18.se1`) in `backend/ephe/`. If missing, the library falls back to Moshier analytical mode and reports `"moshier"` in the metadata.
+5. **Ephemeris Data Files:** Swiss Ephemeris .se1 data files from the official repository (`sepl_18.se1`, `semo_18.se1`, `seas_18.se1`) in `backend/ephe/`. When files are missing, the library can fall back to Moshier and reports the aggregate source in the metadata.
 6. **Thread-Safety Lock:** Swiss Ephemeris C-library maintains global sidereal state (`swe_set_sid_mode`). All calls mutating or reading sidereal mode are synchronized under a module-level lock (`SWE_LOCK` in `app/calc/ayanamsha.py`) to guarantee multi-threaded isolation.
 
 ---
@@ -58,9 +58,9 @@ under SWE_LOCK             Retrograde & Speed flags         under SWE_LOCK
 
 The engine emits an immutable `ChartFacts` document validated via Pydantic v2:
 
-* **Chart Identification:** `chart_id`, `engine_version` (`"0.1.0"`).
+* **Chart Identification:** `chart_id` and `engine_version`.
 * **Metadata Provenance (`ChartMetadata`):**
-  * `ephemeris_source`: `"swieph"` (when `.se1` files are loaded) or `"moshier"` (fallback mode).
+  * `ephemeris_source`: `"swieph"`, `"moshier"`, or `"mixed"` when body results report both sources.
   * `julian_day`: Julian Day UT float.
   * `utc_offset_hours`: Explicit UTC offset.
   * `datetime_utc_iso`: ISO-8601 UTC timestamp.
@@ -68,6 +68,53 @@ The engine emits an immutable `ChartFacts` document validated via Pydantic v2:
   * `f_lagna`: Ascendant fact containing sign, sign index (0-11), degree in sign, absolute longitude, nakshatra, and pada.
   * `f_sun`, `f_moon`, `f_mars`, `f_mercury`, `f_jupiter`, `f_venus`, `f_saturn`, `f_rahu`, `f_ketu`: Planetary placement facts with sign, sign index, house (1-12), degree in sign, absolute longitude, nakshatra, pada, retrograde flag, and daily speed.
   * `f_lagna_sensitivity`: Conditional sensitivity fact emitted only when Lagna is within 0.5° of a sign boundary.
+
+---
+
+### Chart result identity
+
+The profile chart endpoint returns `c_` followed by the first 32 lowercase hex digits
+of SHA-256 over a versioned identity payload. The payload contains `identity_version`
+(currently `1`), the Kundali engine version, resolved settings, chart metadata
+(UTC birth instant, Julian Day UT, UTC offset, and aggregate ephemeris source),
+normalized latitude and longitude, the ordered final chart facts at their existing
+precision, and the native source flag reported for each body. Ketu inherits Rahu's
+source. The per-body map distinguishes results that both report aggregate `"mixed"`.
+The serialization is UTF-8 JSON with sorted object keys, compact separators, and
+finite numeric values.
+
+Profile and owner IDs, labels, persistence timestamps, installation paths, and the
+chart ID itself are excluded. Equal effective birth inputs and chart results share
+an ID, including across profiles. An edit to profile metadata alone leaves the ID
+stable. The ID contains no plaintext birth values and carries no authorization.
+Previous profile-calculation IDs use a different digest format and are not reused.
+Callers should treat IDs as opaque strings. The CLI and fixtures can still supply
+explicit IDs. Ephemeris file versions or byte content are not independently
+fingerprinted when the reported native source and canonical result agree.
+
+### Supported calculation dates
+
+Profile calculation uses the normalized Gregorian instant. It accepts dates where
+the configured Swiss files or Moshier fallback cover all required placements.
+Profile storage keeps its existing validation. Installed data and the selected
+calculation settings determine actual coverage.
+
+Astrodienst describes the analytic fallback as covering roughly 3000 BCE through
+3000 CE. The bundled Swiss Ephemeris 2.10.03 code uses TT Julian Day limits of
+625000.5 and 2818000.5 when deciding whether to fall back for the planets and
+Moon. With an empty file directory, local native checks succeeded on
+0001-01-01 and 3003-04-28 at 22:00 UTC, and returned a coverage error on
+3003-04-29 at 00:00 UTC. These sample instants explain the boundary in the tested
+configuration. The API follows native coverage at the normalized instant.
+[Astrodienst coverage overview](https://www.astro.com/swisseph/swephinfo_e.htm)
+[Swiss Ephemeris 2.10.03 bounds](https://github.com/aloistr/swisseph/blob/v2.10.03/sweph.h#L199-L202)
+[Native fallback implementation](https://github.com/aloistr/swisseph/blob/v2.10.03/sweph.c#L1589-L1603)
+
+A confirmed range failure returns HTTP 409 with `CHART_DATE_OUT_OF_RANGE`.
+This includes native date-limit diagnostics and missing or out-of-range Swiss
+data when the instant is also outside the native fallback interval. Unknown
+native failures return the generic HTTP 500. The response and operational logs
+omit native messages, ephemeris paths, and birth inputs.
 
 ---
 

@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import datetime
-import hashlib
-import json
 import uuid
+from typing import Literal
 
 from pydantic import ValidationError
 
-from app.api.schemas.chart import ChartCalculationResponse
+from app.api.schemas.chart import ChartCalculationResponse, ChartConflictErrorCode
 from app.calc.ayanamsha import CalculationError
-from app.calc.facts import ENGINE_VERSION, ChartSettings, compute_chart_facts
+from app.calc.ephemeris import EphemerisDateRangeError
+from app.calc.facts import ChartSettings, compute_chart_facts
 from app.calc.timeconv import TimeConversionError, TimeInput
 from app.core.config import Settings
 from app.db.models.profile import BirthProfile, InputCalendar, TimeCertainty
@@ -21,7 +21,7 @@ from app.services.profile_service import ProfileCalcInputs, decrypt_profile_calc
 class ChartProfileConflictError(RuntimeError):
     """Raised when a profile state precludes deterministic calculation (HTTP 409)."""
 
-    def __init__(self, *, code: str, detail: str) -> None:
+    def __init__(self, *, code: ChartConflictErrorCode, detail: str) -> None:
         super().__init__(detail)
         self.code = code
         self.detail = detail
@@ -37,34 +37,15 @@ class ChartTimeInputError(ValueError):
 
 
 class ChartCalculationFailureError(RuntimeError):
-    """Raised when internal decryption or astronomical computation fails (HTTP 500)."""
+    """An internal failure with a fixed, privacy-safe diagnostic category (HTTP 500)."""
 
-
-def build_deterministic_chart_id(
-    *,
-    profile_id: uuid.UUID,
-    profile_updated_at: datetime.datetime,
-    settings: ChartSettings,
-    engine_version: str = ENGINE_VERSION,
-) -> str:
-    """Derive an opaque, PII-free deterministic chart identifier."""
-    normalized_updated_at = (
-        profile_updated_at.astimezone(datetime.UTC).isoformat()
-        if profile_updated_at.tzinfo is not None
-        else profile_updated_at.replace(tzinfo=datetime.UTC).isoformat()
-    )
-    payload = json.dumps(
-        {
-            "engine_version": engine_version,
-            "profile_id": str(profile_id),
-            "profile_updated_at": normalized_updated_at,
-            "settings": settings.model_dump(mode="json"),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
-    return f"c_{digest}"
+    def __init__(
+        self,
+        *,
+        category: Literal["invalid_stored_birth_data", "native_calculation", "unexpected"],
+    ) -> None:
+        super().__init__("Unable to compute birth chart")
+        self.category = category
 
 
 def _map_time_conversion_error(exc: TimeConversionError) -> ChartTimeInputError:
@@ -173,7 +154,7 @@ def calculate_profile_chart(
         parsed_date = datetime.date.fromisoformat(date_ad_str)
         parsed_time = datetime.time.fromisoformat(time_local_str)
     except ValueError:
-        raise ChartCalculationFailureError("Unable to compute birth chart") from None
+        raise ChartCalculationFailureError(category="invalid_stored_birth_data") from None
 
     try:
         birth_input = TimeInput(
@@ -191,25 +172,22 @@ def calculate_profile_chart(
             detail="Birth date, time, or coordinate parameters failed validation.",
         ) from None
 
-    chart_id = build_deterministic_chart_id(
-        profile_id=calc_inputs.profile_id,
-        profile_updated_at=calc_inputs.updated_at,
-        settings=calc_settings,
-        engine_version=ENGINE_VERSION,
-    )
-
     try:
-        chart = compute_chart_facts(
-            birth_input=birth_input,
-            settings=calc_settings,
-            chart_id=chart_id,
-        )
+        chart = compute_chart_facts(birth_input=birth_input, settings=calc_settings)
     except TimeConversionError as exc:
         raise _map_time_conversion_error(exc) from None
+    except EphemerisDateRangeError:
+        raise ChartProfileConflictError(
+            code="CHART_DATE_OUT_OF_RANGE",
+            detail=(
+                "The birth date is outside the available ephemeris coverage. "
+                "Check the saved birth date or contact support."
+            ),
+        ) from None
     except CalculationError:
-        raise ChartCalculationFailureError("Unable to compute birth chart") from None
+        raise ChartCalculationFailureError(category="native_calculation") from None
     except Exception:
-        raise ChartCalculationFailureError("Unable to compute birth chart") from None
+        raise ChartCalculationFailureError(category="unexpected") from None
 
     return ChartCalculationResponse(
         profile_id=calc_inputs.profile_id,
