@@ -98,7 +98,7 @@ fingerprinted when the reported native source and canonical result agree.
 
 Each stored v1 document contains the original engine fingerprint, resolved settings, engine version, aggregate ephemeris provenance, and typed facts in engine order. Angles are in degrees and planetary speed is in degrees per day. The authenticated Fernet document includes its snapshot and profile identities. Keeping the versioned facts inline protects the whole result without duplicating raw profile fields or exposing per-fact metadata in plaintext. A keyed lookup digest includes the profile ID, so the storage index does not reveal equal fingerprints across profiles. The snapshot UUID, profile reference/revision, schema version, creation time and digest remain available to the database. Recovering or rotating the Fernet key must account for both ciphertext and its keyed lookup digest.
 
-Repeated results reuse the same row within a profile revision and snapshot schema version. The preparation read transaction ends before native calculation. A short PostgreSQL parent-row lock serializes snapshot insertion with profile edits and deletions, and the uniqueness constraint is the final duplicate guard. Every successful profile PATCH advances the revision, including metadata-only edits. A stale calculation returns `409 PROFILE_CHANGED` and writes nothing. Historical snapshots remain until the parent profile is deleted, which cascades to snapshots and their embedded facts. Snapshot history is accessible by UUID only, with no listing UI. Several snapshots can match the current profile revision, including results from earlier engine versions or different settings. Direct SQL edits to birth data must preserve the revision contract. AI interpretation, Dasha calculations and knowledge retrieval remain unimplemented.
+Repeated results reuse the same row within a profile revision and snapshot schema version. The preparation read transaction ends before native calculation. A short PostgreSQL parent-row lock serializes snapshot insertion with profile edits and deletions, and the uniqueness constraint is the final duplicate guard. Every successful profile PATCH advances the revision, including metadata-only edits. A stale calculation returns `409 PROFILE_CHANGED` and writes nothing. Historical snapshots remain until the parent profile is deleted, which cascades to snapshots and their embedded facts. Snapshot history is accessible by UUID only, with no listing UI. Several snapshots can match the current profile revision, including results from earlier engine versions or different settings. Direct SQL edits to birth data must preserve the revision contract. Snapshot documents contain natal or Moon-only calculations. The Dasha timeline is computed separately by the backend module.
 
 ### Bikram Sambat civil dates
 
@@ -309,6 +309,95 @@ request performance remains unverified.
 Both synthetic profiles were deleted, and all four associated snapshots
 returned HTTP 404. The two synthetic accounts and their audit history remain.
 The live verification did not independently query audit rows.
+
+### Vimshottari Dasha
+
+The backend module `app.calc.dasha` implements the `vimshottari-v1` method.
+Vimshottari is a traditional Jyotish timing convention. Its periods do not
+provide scientifically validated predictions of personal outcomes.
+
+The 27 equal Nakshatras are indexed from Ashwini. Assign lords in the order
+below and repeat it three times. In the classical Krittika-first enumeration
+the same cycle starts at the Sun.
+
+| Ashwini-first order | Ketu | Venus | Sun | Moon | Mars | Rahu | Jupiter | Saturn | Mercury |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Nominal years | 7 | 20 | 6 | 10 | 7 | 18 | 16 | 19 | 17 |
+
+The initial elapsed fraction is the canonical sidereal Moon's distance
+into the birth Nakshatra divided by its exact width of 360/27 degrees.
+This is the equal-arc form of the traditional proportional balance. The
+original Mahadasha start is the recorded UTC birth instant minus the
+elapsed fraction times that lord's full duration. The balance at birth
+is the complementary fraction times the same duration. At an exact
+boundary the incoming lord starts with its full balance.
+
+Each Antardasha lasts its lord's nominal years divided by 120 times the full
+Mahadasha duration. Each Pratyantardasha uses that same rule with the full
+Antardasha as its parent. Each subdivision begins with the parent's lord and
+continues in cyclic order. This makes the subperiods active at birth
+independent of how much of the opening Mahadasha remains. References are
+the [Bṛhat Parāśara Horā Śāstra](https://vedic-astro.s3.amazonaws.com/books/bhrihat_parasara_hora_shastra.pdf),
+chapter 46, verses 12–16 and chapter 51, verses 1–2, and
+[P. V. R. Narasimha Rao, *Vedic Astrology: An Integrated Approach*](https://www.vedicastrologer.org/articles/vedic_astro_textbook.pdf),
+chapter 16, sections 16.2–16.3.
+
+The existing chart settings select a fixed year of 360.0 days (Savana),
+365.2425 days (mean Gregorian calendar year), or 365.25 days (Julian year).
+A day is exactly 86,400 seconds for this calculation. Years never advance
+by calendar anniversaries. Leap seconds and alternate traditions that use
+lunar transit times or other year constants are outside this method.
+
+`calculate_vimshottari_from_chart` takes the natal `ChartFacts` Moon
+placement, UTC instant and `year_days`, with birth-time certainty supplied
+separately. It verifies the stored Nakshatra and Pada against the same
+six-decimal sidereal longitude used by the natal calculation. No second
+ephemeris calculation is performed. `calculate_vimshottari` also accepts
+trusted longitude and an aware datetime directly. It uses the same
+six-decimal quantization and normalizes 360 degrees to zero. A boundary
+that falls between two representable longitudes uses the side of the
+boundary indicated by the stored longitude. Exact birth time is eligible.
+Approximate birth time produces an explicitly conditional result for the
+entered time, with no uncertainty interval for its period dates.
+Unknown-time inputs are ineligible even if their Moon-window Nakshatra is
+stable.
+
+Durations and offsets are exact rational microseconds until each boundary
+is independently rounded to the nearest microsecond, ties to even, relative
+to the same UTC birth instant. Each interval includes its start and excludes
+its end. A parent and its children share the same rounded endpoints, and
+consecutive periods share boundaries without gaps, overlaps or accumulated
+rounding. This precision describes the schedule arithmetic. The underlying
+longitude and recorded birth time constrain its accuracy.
+
+The timeline contains exactly one 120-year cycle from the original opening
+Mahadasha start, including its elapsed portion before birth. It has 9
+Mahadashas, 81 Antardashas and 729 Pratyantardashas. `active_at(instant)`
+looks up all three levels for an explicit aware instant and returns
+`None` outside the cycle. `DashaPeriod.clip` returns a presentation window
+that retains the original period and ID. The timeline ID derives from the
+method version, UTC birth instant, canonical longitude, year length and
+time certainty. Period IDs append the period's position at each level. IDs
+are deterministic calculation identifiers and carry no authorization.
+
+Offline reference tests use Rao's 360-day-year Example 50 lunar position.
+They reproduce the Mars balance of 809.55 days to within 5.4432 seconds.
+The difference comes from converting the book's 2°23′ Aquarius position to
+six-decimal longitude. Subdividing the original Mars period places that
+birth in Mars / Ketu / Jupiter. Rao's separate Venus example gives 1,200
+days for Venus / Venus and 360 days for Venus / Sun, both reproduced
+exactly using the same setting.
+
+Final offline verification passed 96 focused tests, including all 27
+Nakshatra mappings, all nine opening lords, all three year conventions,
+and the public natal-chart regressions. Ruff lint and formatting, mypy,
+and whitespace checks passed.
+
+API access, persistence, Dasha fact integration and frontend visualization
+remain pending. A future
+integration should derive the timeline from an owner-authorized natal
+snapshot with its recorded time certainty and resolved settings, and keep
+it separate from the astronomical Chart Facts.
 
 ### Supported calculation dates
 
