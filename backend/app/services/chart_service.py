@@ -6,21 +6,26 @@ import datetime
 import hmac
 import json
 import uuid
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, undefer
 
 from app.api.schemas.chart import (
+    CalculationResponse,
     ChartCalculationResponse,
     ChartConflictErrorCode,
     ChartFactUnits,
     ChartSnapshotResponse,
+    MoonCalculationResponse,
+    MoonSnapshotResponse,
+    SnapshotResponse,
 )
 from app.calc.ayanamsha import CalculationError
 from app.calc.ephemeris import EphemerisDateRangeError
 from app.calc.facts import ChartSettings, compute_chart_facts
+from app.calc.moon_window import MoonDateRangeError, calculate_moon_window
 from app.calc.timeconv import TimeConversionError, TimeInput
 from app.core.config import Settings
 from app.core.security import decrypt_text, encrypt_text
@@ -29,6 +34,7 @@ from app.db.models.profile import BirthProfile, InputCalendar, TimeCertainty
 from app.services.profile_service import ProfileCalcInputs, decrypt_profile_calc_inputs
 
 SNAPSHOT_SCHEMA_VERSION = 1
+MOON_SNAPSHOT_SCHEMA_VERSION: Final = 2
 
 
 class _StoredSnapshotV1(BaseModel):
@@ -41,6 +47,17 @@ class _StoredSnapshotV1(BaseModel):
     profile_revision: int
     fact_units: ChartFactUnits
     result: ChartCalculationResponse
+
+
+class _StoredSnapshotV2(BaseModel):
+    """Versioned limited result without a natal fact array."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = MOON_SNAPSHOT_SCHEMA_VERSION
+    snapshot_id: uuid.UUID
+    profile_revision: int
+    result: MoonCalculationResponse
 
 
 class ChartProfileConflictError(RuntimeError):
@@ -78,6 +95,7 @@ def _map_time_conversion_error(exc: TimeConversionError) -> ChartTimeInputError:
     messages_by_code = {
         "dst_gap": "A clock change skipped this local birth time in the profile timezone.",
         "dst_overlap": "A clock change repeated this local birth time in the profile timezone.",
+        "nonexistent_local_date": "This local date did not occur in the profile timezone.",
         "invalid_timezone": "Birth profile timezone is invalid or unsupported.",
         "invalid_coordinates": "Birth profile coordinates are out of valid geographic bounds.",
         "invalid_utc_offset": "Birth profile UTC offset is invalid.",
@@ -98,14 +116,6 @@ def _validate_supported_profile_state(profile: BirthProfile) -> None:
             code="AWAITING_BS_CONVERSION",
             detail=("Review and save the birth date to resolve this legacy Bikram Sambat profile."),
         )
-    if profile.time_certainty == TimeCertainty.UNKNOWN:
-        raise ChartProfileConflictError(
-            code="UNKNOWN_TIME_UNSUPPORTED",
-            detail=(
-                "Chart calculation requires a recorded birth time; unknown birth time "
-                "is unsupported."
-            ),
-        )
 
 
 def _ensure_complete_decrypted_inputs(calc_inputs: ProfileCalcInputs) -> tuple[str, str, str]:
@@ -119,14 +129,6 @@ def _ensure_complete_decrypted_inputs(calc_inputs: ProfileCalcInputs) -> tuple[s
         raise ChartProfileConflictError(
             code="INCOMPLETE_BIRTH_DATA",
             detail="Birth profile is missing resolved Gregorian AD date information.",
-        )
-    if calc_inputs.time_certainty == TimeCertainty.UNKNOWN:
-        raise ChartProfileConflictError(
-            code="UNKNOWN_TIME_UNSUPPORTED",
-            detail=(
-                "Chart calculation requires a recorded birth time; unknown birth time "
-                "is unsupported."
-            ),
         )
     if not calc_inputs.time_local or not calc_inputs.time_local.strip():
         raise ChartProfileConflictError(
@@ -151,7 +153,7 @@ def calculate_profile_chart(
     owner_id: uuid.UUID,
     calc_settings: ChartSettings,
     app_settings: Settings,
-) -> ChartCalculationResponse:
+) -> CalculationResponse:
     """Decrypt owned birth profile fields in memory and compute deterministic ChartFacts.
 
     Does not persist charts, cache computed outputs, or emit per-request AuditLog records.
@@ -166,6 +168,38 @@ def calculate_profile_chart(
         owner_id=owner_id,
         settings=app_settings,
     )
+    certainty = calc_inputs.time_certainty
+    if certainty == TimeCertainty.UNKNOWN:
+        if not calc_inputs.date_ad or not calc_inputs.timezone:
+            raise ChartProfileConflictError(
+                code="INCOMPLETE_BIRTH_DATA",
+                detail="A resolved date and timezone are required for the Moon window.",
+            )
+        try:
+            moon = calculate_moon_window(
+                datetime.date.fromisoformat(calc_inputs.date_ad),
+                calc_inputs.timezone,
+                calc_settings.ayanamsha,
+            )
+        except (MoonDateRangeError, EphemerisDateRangeError):
+            raise ChartProfileConflictError(
+                code="CHART_DATE_OUT_OF_RANGE",
+                detail="The local date is outside the supported Moon window coverage.",
+            ) from None
+        except TimeConversionError as exc:
+            raise _map_time_conversion_error(exc) from None
+        except CalculationError:
+            raise ChartCalculationFailureError(category="native_calculation") from None
+        except ValueError:
+            raise ChartCalculationFailureError(category="invalid_stored_birth_data") from None
+        return MoonCalculationResponse(
+            profile_id=calc_inputs.profile_id,
+            profile_updated_at=calc_inputs.updated_at,
+            input_calendar=calc_inputs.input_calendar,
+            time_certainty=certainty,
+            moon=moon,
+        )
+
     date_ad_str, time_local_str, timezone_str = _ensure_complete_decrypted_inputs(calc_inputs)
 
     try:
@@ -211,7 +245,7 @@ def calculate_profile_chart(
         profile_id=calc_inputs.profile_id,
         profile_updated_at=calc_inputs.updated_at,
         input_calendar=calc_inputs.input_calendar,
-        time_certainty=calc_inputs.time_certainty,
+        time_certainty=certainty,
         chart=chart,
     )
 
@@ -222,9 +256,17 @@ def _fingerprint_key(profile_id: uuid.UUID, chart_id: str, encryption_key: str) 
     return hmac.digest(encryption_key.encode("ascii"), message, "sha256").hex()
 
 
+def _result_id(result: CalculationResponse) -> str:
+    return (
+        result.moon.chart_id
+        if isinstance(result, MoonCalculationResponse)
+        else result.chart.chart_id
+    )
+
+
 def persist_chart_snapshot(
     db: Session,
-    result: ChartCalculationResponse,
+    result: CalculationResponse,
     *,
     profile_revision: int,
     owner_id: uuid.UUID,
@@ -246,23 +288,33 @@ def persist_chart_snapshot(
         )
 
     key = app_settings.ENCRYPTION_KEY
-    fingerprint = _fingerprint_key(result.profile_id, result.chart.chart_id, key)
+    lunar = isinstance(result, MoonCalculationResponse)
+    schema_version = MOON_SNAPSHOT_SCHEMA_VERSION if lunar else SNAPSHOT_SCHEMA_VERSION
+    fingerprint = _fingerprint_key(result.profile_id, _result_id(result), key)
     snapshot_id = db.scalar(
         select(ChartSnapshot.id).where(
             ChartSnapshot.profile_id == result.profile_id,
             ChartSnapshot.profile_revision == profile_revision,
-            ChartSnapshot.schema_version == SNAPSHOT_SCHEMA_VERSION,
+            ChartSnapshot.schema_version == schema_version,
             ChartSnapshot.fingerprint_key == fingerprint,
         )
     )
     if snapshot_id is None:
         snapshot_id = uuid.uuid4()
-        document = _StoredSnapshotV1(
-            snapshot_id=snapshot_id,
-            profile_revision=profile_revision,
-            result=result,
-            fact_units=ChartFactUnits(),
-        )
+        document: _StoredSnapshotV1 | _StoredSnapshotV2
+        if isinstance(result, MoonCalculationResponse):
+            document = _StoredSnapshotV2(
+                snapshot_id=snapshot_id,
+                profile_revision=profile_revision,
+                result=result,
+            )
+        else:
+            document = _StoredSnapshotV1(
+                snapshot_id=snapshot_id,
+                profile_revision=profile_revision,
+                result=result,
+                fact_units=ChartFactUnits(),
+            )
         canonical = json.dumps(
             document.model_dump(mode="json"),
             sort_keys=True,
@@ -275,7 +327,7 @@ def persist_chart_snapshot(
                 id=snapshot_id,
                 profile_id=result.profile_id,
                 profile_revision=profile_revision,
-                schema_version=SNAPSHOT_SCHEMA_VERSION,
+                schema_version=schema_version,
                 fingerprint_key=fingerprint,
                 payload_enc=encrypt_text(canonical, key),
             )
@@ -286,7 +338,7 @@ def persist_chart_snapshot(
 
 def get_chart_snapshot(
     db: Session, snapshot_id: uuid.UUID, *, owner_id: uuid.UUID, app_settings: Settings
-) -> ChartSnapshotResponse | None:
+) -> SnapshotResponse | None:
     """Read and decrypt a snapshot after checking live profile ownership."""
     row = db.execute(
         select(ChartSnapshot, BirthProfile.revision)
@@ -298,22 +350,27 @@ def get_chart_snapshot(
         return None
 
     snapshot, current_revision = row
-    if snapshot.schema_version != SNAPSHOT_SCHEMA_VERSION:
-        raise ValueError("Unsupported chart snapshot schema")
     key = app_settings.ENCRYPTION_KEY
-    stored = _StoredSnapshotV1.model_validate_json(decrypt_text(snapshot.payload_enc, key))
+    model: type[_StoredSnapshotV1] | type[_StoredSnapshotV2]
+    if snapshot.schema_version == SNAPSHOT_SCHEMA_VERSION:
+        model = _StoredSnapshotV1
+    elif snapshot.schema_version == MOON_SNAPSHOT_SCHEMA_VERSION:
+        model = _StoredSnapshotV2
+    else:
+        raise ValueError("Unsupported chart snapshot schema")
+    stored = model.model_validate_json(decrypt_text(snapshot.payload_enc, key))
     if (
         stored.snapshot_id != snapshot.id
         or stored.profile_revision != snapshot.profile_revision
         or stored.result.profile_id != snapshot.profile_id
         or not hmac.compare_digest(
             snapshot.fingerprint_key,
-            _fingerprint_key(snapshot.profile_id, stored.result.chart.chart_id, key),
+            _fingerprint_key(snapshot.profile_id, _result_id(stored.result), key),
         )
     ):
         raise ValueError("Chart snapshot integrity check failed")
 
-    return ChartSnapshotResponse(
+    response_data = dict(
         **stored.result.model_dump(),
         snapshot_id=snapshot.id,
         schema_version=stored.schema_version,
@@ -324,5 +381,7 @@ def get_chart_snapshot(
             if snapshot.created_at.tzinfo is not None
             else snapshot.created_at.replace(tzinfo=datetime.UTC)
         ),
-        fact_units=stored.fact_units,
     )
+    if isinstance(stored, _StoredSnapshotV2):
+        return MoonSnapshotResponse.model_validate(response_data)
+    return ChartSnapshotResponse.model_validate({**response_data, "fact_units": stored.fact_units})

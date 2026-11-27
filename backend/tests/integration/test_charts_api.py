@@ -470,7 +470,7 @@ def test_chart_endpoint_409_blocked_states_without_calc_invocation(
     user_factory: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """BS and unknown-time profiles return 409 Conflict with codes and zero engine calls."""
+    """Pending BS profiles are blocked and unknown-time profiles bypass the natal engine."""
     user_factory(email="blocked@example.com", role=UserRole.USER)
     headers = _auth_headers(client, "blocked@example.com")
 
@@ -517,10 +517,10 @@ def test_chart_endpoint_409_blocked_states_without_calc_invocation(
         json={},
         headers=headers,
     )
-    assert unk_resp.status_code == 409
+    assert unk_resp.status_code == 200
     assert unk_resp.headers.get("cache-control") == "no-store"
-    assert unk_resp.json()["code"] == "UNKNOWN_TIME_UNSUPPORTED"
-    assert "2000-05-10" not in unk_resp.text
+    assert unk_resp.json()["time_certainty"] == "unknown"
+    assert "chart" not in unk_resp.json()
 
 
 def test_chart_endpoint_sanitized_422_validation_and_synthetic_isolation(
@@ -1045,3 +1045,89 @@ def test_search_and_historical_clock_errors_are_bounded_and_sanitized(
         headers=headers,
     )
     assert updated.status_code == 422 and updated.json()["code"] == "dst_overlap"
+
+
+def test_unknown_time_snapshot_idempotency_and_known_time_transitions(
+    client: TestClient, user_factory: Any
+) -> None:
+    owner = user_factory()
+    headers = _auth_headers(client, owner.email)
+    other = _auth_headers(client, user_factory(email="other-lunar-profile@example.com").email)
+    ad = _create_profile(
+        client,
+        headers,
+        entered_date="2015-04-25",
+        time_certainty="unknown",
+        time_local=None,
+    )
+    bs = _create_profile(
+        client,
+        headers,
+        input_calendar="BS",
+        entered_date="2072-01-12",
+        time_certainty="unknown",
+        time_local=None,
+    )
+    profile = f"/api/v1/profiles/{ad['id']}"
+    first = client.post(f"{profile}/chart", headers=headers)
+    again = client.post(f"{profile}/chart", json={"node_type": "true"}, headers=headers)
+    equivalent = client.post(f"/api/v1/profiles/{bs['id']}/chart", headers=headers)
+    assert first.status_code == again.status_code == equivalent.status_code == 200
+    assert first.json()["moon"] == again.json()["moon"] == equivalent.json()["moon"]
+    assert "chart" not in first.json()
+    assert first.json()["moon"]["chart_id"].startswith("m_")
+    snapshot_url = first.headers["location"]
+    assert snapshot_url == again.headers["location"] != equivalent.headers["location"]
+    snapshot = client.get(snapshot_url, headers=headers).json()
+    assert snapshot["schema_version"] == 2 and snapshot["is_current_profile_revision"]
+    assert snapshot["moon"] == first.json()["moon"]
+    assert "fact_units" not in snapshot and "chart" not in snapshot
+    assert client.get(snapshot_url, headers=other).status_code == 404
+
+    known = client.patch(
+        profile, json={"time_certainty": "exact", "time_local": "08:30"}, headers=headers
+    )
+    assert known.status_code == 200
+    natal = client.post(f"{profile}/chart", headers=headers)
+    assert natal.status_code == 200 and natal.json()["chart"]["chart_id"].startswith("c_")
+    assert "moon" not in natal.json()
+    natal_url = natal.headers["location"]
+    assert client.get(natal_url, headers=headers).json()["schema_version"] == 1
+    assert not client.get(snapshot_url, headers=headers).json()["is_current_profile_revision"]
+    unknown = client.patch(
+        profile, json={"time_certainty": "unknown", "time_local": None}, headers=headers
+    )
+    assert unknown.status_code == 200
+    lunar_again = client.post(f"{profile}/chart", headers=headers)
+    assert lunar_again.status_code == 200 and lunar_again.json()["moon"] == snapshot["moon"]
+    assert lunar_again.headers["location"] != snapshot_url
+    assert not client.get(natal_url, headers=headers).json()["is_current_profile_revision"]
+
+
+@pytest.mark.parametrize(
+    ("day", "timezone", "status_code", "code"),
+    [
+        ("1800-12-31", "UTC", 409, "CHART_DATE_OUT_OF_RANGE"),
+        ("2011-12-30", "Pacific/Apia", 422, "nonexistent_local_date"),
+    ],
+)
+def test_unknown_time_rejects_out_of_scope_or_skipped_local_dates(
+    client: TestClient,
+    user_factory: Any,
+    day: str,
+    timezone: str,
+    status_code: int,
+    code: str,
+) -> None:
+    headers = _auth_headers(client, user_factory().email)
+    profile = _create_profile(
+        client,
+        headers,
+        entered_date=day,
+        timezone=timezone,
+        time_certainty="unknown",
+        time_local=None,
+    )
+    result = client.post(f"/api/v1/profiles/{profile['id']}/chart", headers=headers)
+    assert result.status_code == status_code and result.json()["code"] == code
+    assert result.headers.get("location") is None and day not in result.text

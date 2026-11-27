@@ -214,7 +214,7 @@ def test_service_blocks_bs_unknown_and_incomplete_profiles_without_calc(
     test_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """BS, unknown-time, and incomplete AD profiles raise 409 conflicts without calling calc."""
+    """Blocked profiles and lunar windows never call the natal calculation."""
     calc_calls = 0
 
     def _forbidden_calc(*_args: Any, **_kwargs: Any) -> Any:
@@ -245,14 +245,14 @@ def test_service_blocks_bs_unknown_and_incomplete_profiles_without_calc(
         time_certainty=TimeCertainty.UNKNOWN,
         time_local=None,
     )
-    with pytest.raises(ChartProfileConflictError) as unk_exc:
-        calculate_profile_chart(
-            unknown_profile,
-            owner_id=owner,
-            calc_settings=ChartSettings(),
-            app_settings=test_settings,
-        )
-    assert unk_exc.value.code == "UNKNOWN_TIME_UNSUPPORTED"
+    lunar = calculate_profile_chart(
+        unknown_profile,
+        owner_id=owner,
+        calc_settings=ChartSettings(),
+        app_settings=test_settings,
+    )
+    assert lunar.time_certainty == TimeCertainty.UNKNOWN
+    assert "chart" not in lunar.model_dump()
 
     # Simulated incomplete decrypted profile (e.g. blank timezone or missing time_local in memory)
     incomplete_calc_inputs = SimpleNamespace(

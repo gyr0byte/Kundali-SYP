@@ -242,6 +242,74 @@ The three synthetic profiles were deleted and all four known snapshot URLs
 returned HTTP 404. One synthetic development account and its audit history
 remain. The browser verification did not independently query audit records.
 
+### Unknown birth time
+
+After BS normalization, the lunar mode uses the complete UTC preimage of the
+saved local date. It enumerates the three UTC days that can overlap the date
+on the integral-second grid used by IANA TZif. It merges consecutive matching
+seconds into half-open intervals. This retains repeated clock times and dates
+with disjoint UTC spans, and rejects skipped dates such as Apia 2011-12-30.
+The model treats each UTC day as 86,400 seconds, consistent with Python
+`datetime` and the existing chart pipeline. Lunar mode supports Gregorian
+dates from 1801-01-01 through 2199-12-31, subject to ephemeris coverage.
+
+The calculation evaluates the geocentric sidereal Moon with the existing Swiss
+Ephemeris flags and selected ayanamsha. Each UTC span is divided into cells of
+at most ten minutes. Each midpoint is surrounded by an angular radius equal to
+half the cell duration multiplied by 30 degrees per day, plus 0.01 degree.
+The 30 degrees per day is a conservative engineering bound for lunar motion
+in this date range, informed by lunar orbital speed, distance, and inclination.
+It is an assumption about the model inside each cell, not a measured maximum
+from the sample grid. The 0.01 degree margin covers floating-point boundaries
+and provides headroom over documented ephemeris discrepancies. It is not a
+certified error bound. The samples and edge checks reject mixed ephemeris
+sources, speeds exceeding the bound, or adjacent motion inconsistent with
+the bound and margin. In those cases categories are unavailable.
+
+Possible values are the union of all zodiac, nakshatra and pada bins
+intersected by the enclosures, including across 0/360 degrees. A series is
+stable only if this union has one bin. Otherwise the series is uncertain.
+Conservative bounds can include neighboring bins that the true trajectory
+does not reach, including at the exclusive end of the local date. The
+interval boundaries are civil-time limits, not a birth time. An independent
+offline fixture checks three tropical Moon samples against JPL Horizons DE441
+before the application-specific sidereal convention is applied.
+[NASA lunar orbital context](https://eclipse.gsfc.nasa.gov/SEhelp/moonorbit.html),
+[Swiss Ephemeris accuracy](https://www.astro.com/swisseph/swisseph.htm),
+[JPL Horizons](https://ssd.jpl.nasa.gov/horizons/).
+
+`POST /api/v1/profiles/{profile_id}/chart` uses the saved certainty. The
+known-time response retains its `chart` field and version 1 encrypted
+snapshot document. Unknown time returns a `moon` field with the UTC spans,
+duration, source, ayanamsha, method, and typed possible sets. It has no
+ascendant, houses, natal fact IDs, or exact lunar position. It uses a domain
+distinct `m_` fingerprint and an encrypted version 2 snapshot. The existing
+ownership, profile revision, and idempotency checks apply. No schema migration
+is required. Future interpretation consumers must handle this result as
+interval evidence separately from the natal fact allowlist.
+
+Offline verification passed 65 backend tests, 22 frontend tests, two mocked
+Playwright checks, and three independent JPL longitude comparisons within
+0.01 degree. Live verification used the restricted development PostgreSQL
+role at 1440 × 900 in English and 375 × 812 in Nepali. It confirmed equivalent
+AD and BS Moon results, idempotent version 2 persistence, cross-user 404s,
+and profile revision tracking through both directions of a birth-time edit.
+The version 1 compatibility check used a newly created synthetic natal
+snapshot. The unknown-time views showed the limited result without an
+ascendant, houses, an exact birth instant, or a natal chart. The browser
+reported zero unexpected errors, network failures, or horizontal overflow.
+
+The numerical guarantee is conditional on the motion bound and margin.
+The enclosures give conservative possibilities. Unknown-time results are
+ineligible for exact Dasha calculations. The three timing probes used
+146–160 Swiss Ephemeris calls and observed about 6–135 ms for the locked
+calculation. These observations do not guarantee latency. Concurrent
+request performance remains unverified.
+
+Both synthetic profiles were deleted, and all four associated snapshots
+returned HTTP 404. The two synthetic accounts and their audit history remain.
+The live verification did not independently query audit rows.
+
 ### Supported calculation dates
 
 Profile calculation uses the normalized Gregorian instant. It accepts dates where

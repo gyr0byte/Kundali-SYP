@@ -65,6 +65,7 @@ import type {
 } from "@/lib/kundali/types";
 import { BirthProfileForm } from "./BirthProfileForm";
 import { CalculationSettingsPopover } from "./CalculationSettingsPopover";
+import { MoonWindowPanel, type MoonWindowLabels } from "./MoonWindowPanel";
 import { KundaliChartPlaceholder, KundaliSvgChart } from "./KundaliSvgChart";
 import { PlanetaryTable, PlanetaryTableSkeleton } from "./PlanetaryTable";
 
@@ -188,6 +189,7 @@ export interface WorkspaceMessages {
   skipToWorkspace: string;
   compatibilityUnavailable: string;
   chartIssues: Record<ChartIssue, string>;
+  moonWindow: MoonWindowLabels;
   dashaOnlyNotice: string;
   chartSectionTitle: string;
   northLabel: string;
@@ -382,9 +384,10 @@ export function UserChartWorkspace({
   // Dasha year length does not change placements. A new calculation sends
   // the latest applied year length; a displayed result keeps its own settings.
   const chartContext = chartProfile ? JSON.stringify([
-    chartProfile.owner_id, chartProfile.id, chartProfile.updated_at,
-    appliedSettings.ayanamsha, appliedSettings.house_system,
-    appliedSettings.node_type, appliedSettings.preset,
+    chartProfile.owner_id, chartProfile.id, chartProfile.updated_at, chartProfile.time_certainty,
+    appliedSettings.ayanamsha,
+    ...(chartProfile.time_certainty === "unknown" ? [] :
+      [appliedSettings.house_system, appliedSettings.node_type, appliedSettings.preset]),
   ]) : null;
   const [chartState, setChartState] = useState<{
     context: string | null;
@@ -409,10 +412,11 @@ export function UserChartWorkspace({
 
   const samplePreview = getSamplePreview(activeProfile, appliedSettings);
   const result = chartRun.status === "success" ? chartRun.result : null;
-  const chart = result?.chart ?? samplePreview.chart;
+  const moon = result?.time_certainty === "unknown" ? result.moon : null;
+  const chart = result && result.time_certainty !== "unknown" ? result.chart : samplePreview.chart;
   const calcState = result ? "ready" : samplePreview.state;
   const resolvedSettings = chart?.settings ?? appliedSettings;
-  const provenanceStatus = getProvenanceStatus(chart, calcState);
+  const provenanceStatus = moon?.ephemeris_source ?? getProvenanceStatus(chart, calcState);
   const unknownTimeMode = isUnknownTimeProfile(activeProfile);
   const sensitivityFact = getSensitivityFact(chart);
 
@@ -915,9 +919,8 @@ export function UserChartWorkspace({
     ? chartProfile.bs_conversion_status === "awaiting_bs_conversion" ||
       (chartProfile.input_calendar === "BS" && !chartProfile.date_ad)
       ? "bsPending"
-      : chartProfile.time_certainty === "unknown"
-        ? "unknownTime"
-        : !chartProfile.date_ad || !chartProfile.time_local || !chartProfile.timezone
+      : !chartProfile.date_ad || !chartProfile.timezone ||
+          (chartProfile.time_certainty !== "unknown" && !chartProfile.time_local)
           ? "incomplete"
           : null
     : null;
@@ -1030,6 +1033,7 @@ export function UserChartWorkspace({
 
       <CalculationSettingsPopover
         open={settingsOpen}
+        moonOnly={page === "chart" && unknownTimeMode}
         align={page === "settings" ? "start" : "end"}
         locale={locale}
         appliedSettings={appliedSettings}
@@ -1059,12 +1063,13 @@ export function UserChartWorkspace({
     </div>
   );
   const languageLabel = locale === "ne" ? "labelNe" : "labelEn";
-  const ayanamsha = AYANAMSHA_OPTIONS.find(({ value }) => value === resolvedSettings.ayanamsha);
+  const ayanamsha = AYANAMSHA_OPTIONS.find(({ value }) => value === (moon?.ayanamsha ?? resolvedSettings.ayanamsha));
   const nodeType = NODE_TYPE_OPTIONS.find(({ value }) => value === resolvedSettings.node_type);
   const yearLength = YEAR_DAYS_OPTIONS.find(({ value }) => value === resolvedSettings.year_days);
   const conventions = (
     <span className="min-w-0 text-xs leading-relaxed text-[var(--kundali-muted)]">
-      {ayanamsha?.[languageLabel]} · {nodeType?.[languageLabel]} · {t.houseSystemFixedValue}
+      {ayanamsha?.[languageLabel]}
+      {!(page === "chart" && unknownTimeMode) && <> · {nodeType?.[languageLabel]} · {t.houseSystemFixedValue}</>}
     </span>
   );
 
@@ -1498,7 +1503,7 @@ export function UserChartWorkspace({
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--kundali-border)] pt-3">
                   {conventions}
-                  {chart ? <span className={`rounded border px-2 py-1 text-xs font-semibold ${provenanceClasses}`}>{provenanceLabel}</span> : null}
+                  {chart || moon?.ephemeris_source ? <span className={`rounded border px-2 py-1 text-xs font-semibold ${provenanceClasses}`}>{provenanceLabel}</span> : null}
                 </div>
               </section>
               {activeProfile?.is_synthetic_sample ? (
@@ -1531,7 +1536,7 @@ export function UserChartWorkspace({
                 <div className="flex min-h-16 flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-4 py-3 text-sm">
                   <div className="min-w-0 flex-1 basis-40 leading-relaxed">
                     <p role="status" className="font-semibold text-[var(--kundali-navy)]">
-                      {isCalculating ? t.calculatingChart : result ? t.chartCalculated : chartIssue ? "" : t.readyToCalculate}
+                      {isCalculating ? t.calculatingChart : moon ? t.moonWindow.calculated : result ? t.chartCalculated : chartIssue ? "" : t.readyToCalculate}
                     </p>
                     {chartIssue ? (
                       <p role={chartRun.status === "error" ? "alert" : undefined} className="text-[var(--kundali-crimson)]">
@@ -1559,9 +1564,11 @@ export function UserChartWorkspace({
                       onClick={() => void handleCalculateChart()}
                       className="min-h-11 rounded bg-[var(--kundali-navy)] px-5 py-2 text-sm font-semibold text-[var(--kundali-cream)] hover:bg-[var(--kundali-navy-hover)] aria-disabled:opacity-60"
                     >
-                      {canRetryChart ? t.retryChart : result ? t.recalculateChart : t.calculateChart}
+                      {canRetryChart ? t.retryChart : unknownTimeMode
+                        ? (result ? t.moonWindow.recalculate : t.moonWindow.calculate)
+                        : (result ? t.recalculateChart : t.calculateChart)}
                     </button>
-                  ) : ["bsPending", "unknownTime", "incomplete", "dateRange"].some((issue) => issue === chartIssue) ? (
+                  ) : ["bsPending", "unknownTime", "incomplete", "dateRange", "nonexistentDate"].some((issue) => issue === chartIssue) ? (
                     <button type="button" onClick={() => openPage("profiles")}
                       className="min-h-11 rounded border border-[var(--kundali-border)] px-3 text-sm font-semibold text-[var(--kundali-navy)] hover:bg-[var(--kundali-strip)]">
                       {t.openProfiles}
@@ -1595,6 +1602,9 @@ export function UserChartWorkspace({
               ) : null}
 
 
+              {unknownTimeMode ? (
+                <MoonWindowPanel result={moon} labels={t.moonWindow} locale={locale} />
+              ) : (
               <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(275px,.85fr)_minmax(0,1.5fr)]">
                 <section
                   aria-label={t.chartSectionTitle}
@@ -1732,6 +1742,7 @@ export function UserChartWorkspace({
                   )}
                 </section>
               </div>
+              )}
               {chart ? (
                 <details key={chart.chart_id} className="rounded border border-[var(--kundali-border)] bg-white px-4">
                   <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-[var(--kundali-navy)] [&::-webkit-details-marker]:hidden">

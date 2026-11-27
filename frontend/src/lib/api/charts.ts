@@ -15,7 +15,7 @@ export function calculateChart(
     });
   }
 
-  const body = settings.preset
+  const body = profile.time_certainty === "unknown" ? { ayanamsha: settings.ayanamsha } : settings.preset
     ? { preset: settings.preset, year_days: settings.year_days }
     : {
         ayanamsha: settings.ayanamsha,
@@ -41,7 +41,8 @@ export function matchesChartProfile(result: ChartCalculationResponse, profile: B
 
 export type ChartIssue =
   | "bsPending" | "unknownTime" | "incomplete" | "dateRange"
-  | "auth" | "forbidden" | "missing" | "validation" | "server" | "network" | "profileChanged";
+  | "auth" | "forbidden" | "missing" | "validation" | "server" | "network" | "profileChanged"
+  | "nonexistentDate";
 
 export function getChartIssue(error: unknown): ChartIssue {
   if (!(error instanceof ApiClientError)) return "server";
@@ -57,7 +58,7 @@ export function getChartIssue(error: unknown): ChartIssue {
     case 401: return "auth";
     case 403: return "forbidden";
     case 404: return "missing";
-    case 422: return "validation";
+    case 422: return error.responseCode === "nonexistent_local_date" ? "nonexistentDate" : "validation";
     default: return error.code === "NETWORK_ERROR" ? "network" : "server";
   }
 }

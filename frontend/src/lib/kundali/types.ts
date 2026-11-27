@@ -85,13 +85,38 @@ export interface ChartFacts {
   facts: ChartFact[];
 }
 
-export interface ChartCalculationResponse {
+interface CalculationProfileContext {
   profile_id: string;
   profile_updated_at: string;
   input_calendar: CalendarType;
-  time_certainty: TimeCertainty;
+}
+
+export interface NatalCalculationResponse extends CalculationProfileContext {
+  time_certainty: "exact" | "approximate";
   chart: ChartFacts;
 }
+
+export interface MoonValues<T> {
+  status: "stable" | "uncertain" | "unavailable";
+  possible: T[];
+}
+
+export interface MoonWindow {
+  chart_id: string;
+  method: "moon-civil-window-v1";
+  ayanamsha: ChartSettings["ayanamsha"];
+  utc_intervals: { start_utc: string; end_utc_exclusive: string }[];
+  duration_seconds: number;
+  ephemeris_source: "swieph" | "moshier" | null;
+  signs: MoonValues<number>;
+  nakshatras: MoonValues<string>;
+  padas: MoonValues<{ nakshatra: string; pada: number }>;
+}
+
+export type ChartCalculationResponse = NatalCalculationResponse | (CalculationProfileContext & {
+  time_certainty: "unknown";
+  moon: MoonWindow;
+});
 
 export type BsConversionStatus = "resolved" | "awaiting_bs_conversion";
 

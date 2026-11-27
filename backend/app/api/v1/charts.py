@@ -10,10 +10,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.schemas.chart import (
+    CalculationResponse,
     ChartCalculationRequest,
-    ChartCalculationResponse,
     ChartConflictErrorResponse,
-    ChartSnapshotResponse,
+    SnapshotResponse,
 )
 from app.core.config import Settings
 from app.core.dependencies import get_db, get_owned_or_404, get_settings
@@ -46,7 +46,7 @@ def _internal_failure(category: str) -> JSONResponse:
 
 @router.post(
     "/profiles/{profile_id}/chart",
-    response_model=ChartCalculationResponse,
+    response_model=CalculationResponse,
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_200_OK: {
@@ -64,7 +64,7 @@ def compute_profile_chart_endpoint(
     current_user: User = Depends(require_permission(Permission.CHART_READ_OWN)),
     db: Session = Depends(get_db),
     app_settings: Settings = Depends(get_settings),
-) -> ChartCalculationResponse | Response:
+) -> CalculationResponse | Response:
     """Compute a deterministic Vedic chart for an owned, calculation-eligible birth profile."""
     owner_id = current_user.id
     profile = get_owned_or_404(BirthProfile, profile_id, owner_id, db)
@@ -124,14 +124,14 @@ def compute_profile_chart_endpoint(
     return result
 
 
-@router.get("/charts/{snapshot_id}", response_model=ChartSnapshotResponse)
+@router.get("/charts/{snapshot_id}", response_model=SnapshotResponse)
 def read_chart_snapshot(
     snapshot_id: uuid.UUID,
     response: Response,
     current_user: User = Depends(require_permission(Permission.CHART_READ_OWN)),
     db: Session = Depends(get_db),
     app_settings: Settings = Depends(get_settings),
-) -> ChartSnapshotResponse | Response:
+) -> SnapshotResponse | Response:
     """Retrieve an owned immutable result by its opaque resource ID."""
     try:
         result = get_chart_snapshot(

@@ -12,6 +12,7 @@ import type { ChartSettings, Locale } from "@/lib/kundali/types";
 
 interface CalculationSettingsPopoverProps {
   open: boolean;
+  moonOnly?: boolean;
   align?: "start" | "end";
   locale: Locale;
   appliedSettings: ChartSettings;
@@ -41,6 +42,7 @@ interface CalculationSettingsPopoverProps {
 
 export function CalculationSettingsPopover({
   open,
+  moonOnly = false,
   align = "end",
   locale,
   appliedSettings,
@@ -85,7 +87,7 @@ export function CalculationSettingsPopover({
       </div>
 
       <div className="mt-3 space-y-3 text-xs">
-        <div>
+        {!moonOnly && <div>
           <span className="block font-medium text-[var(--kundali-ink)]">{labels.presetLabel}</span>
           <div className="mt-1.5 grid grid-cols-2 gap-2">
             <button
@@ -121,7 +123,7 @@ export function CalculationSettingsPopover({
               {labels.presetHamro}
             </button>
           </div>
-        </div>
+        </div>}
 
         <div>
           <label
@@ -147,6 +149,7 @@ export function CalculationSettingsPopover({
           </select>
         </div>
 
+        {!moonOnly && <>
         <div>
           <label
             htmlFor="calc-node-type"
@@ -204,6 +207,7 @@ export function CalculationSettingsPopover({
           </select>
         </div>
 
+        </>}
         <div
           className={`rounded border px-2.5 py-2 text-[11px] leading-relaxed ${
             scope === "none"

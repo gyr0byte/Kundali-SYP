@@ -16,6 +16,7 @@ from app.calc.facts import (
     ChartFacts,
     ChartSettings,
 )
+from app.calc.moon_window import MoonWindow
 from app.db.models.profile import InputCalendar, TimeCertainty
 
 ChartPreset = Literal["hamro_patro_compat"]
@@ -103,8 +104,23 @@ class ChartCalculationResponse(BaseModel):
     profile_id: uuid.UUID
     profile_updated_at: datetime.datetime
     input_calendar: InputCalendar
-    time_certainty: TimeCertainty
+    time_certainty: Literal[TimeCertainty.EXACT, TimeCertainty.APPROXIMATE]
     chart: ChartFacts
+
+
+class MoonCalculationResponse(BaseModel):
+    """Limited result for an unknown birth time, with no natal chart facts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: uuid.UUID
+    profile_updated_at: datetime.datetime
+    input_calendar: InputCalendar
+    time_certainty: Literal[TimeCertainty.UNKNOWN]
+    moon: MoonWindow
+
+
+CalculationResponse = ChartCalculationResponse | MoonCalculationResponse
 
 
 class ChartConflictErrorResponse(BaseModel):
@@ -132,3 +148,14 @@ class ChartSnapshotResponse(ChartCalculationResponse):
     is_current_profile_revision: bool
     created_at: datetime.datetime
     fact_units: ChartFactUnits
+
+
+class MoonSnapshotResponse(MoonCalculationResponse):
+    snapshot_id: uuid.UUID
+    schema_version: Literal[2]
+    profile_revision: int
+    is_current_profile_revision: bool
+    created_at: datetime.datetime
+
+
+SnapshotResponse = ChartSnapshotResponse | MoonSnapshotResponse
