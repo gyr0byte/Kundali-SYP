@@ -12,11 +12,19 @@ from fastapi.responses import JSONResponse, Response
 from app.api.v1.admin import router as admin_router
 from app.api.v1.astrologer import router as astrologer_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.birthplaces import router as birthplaces_router
 from app.api.v1.charts import router as charts_router
 from app.api.v1.profiles import router as profiles_router
 from app.calc.bikram_sambat import CALENDAR_DATE_ERROR_CODES
 from app.core.config import Settings, get_settings
 from app.core.security import validate_fernet_key
+
+_PROFILE_INPUT_CODES = CALENDAR_DATE_ERROR_CODES | {
+    "dst_gap",
+    "dst_overlap",
+    "invalid_birthplace",
+    "missing_birthplace",
+}
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -61,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_v1.include_router(auth_router)
     api_v1.include_router(admin_router)
     api_v1.include_router(astrologer_router)
+    api_v1.include_router(birthplaces_router)
     api_v1.include_router(profiles_router)
     api_v1.include_router(charts_router)
     app.include_router(api_v1)
@@ -70,7 +79,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, exc: RequestValidationError
     ) -> Response:
         """Strip submitted inputs/context from 422 errors on birth-profile routes."""
-        if request.url.path.startswith(("/api/v1/profiles", "/api/v1/charts")):
+        if request.url.path.startswith(
+            ("/api/v1/profiles", "/api/v1/charts", "/api/v1/birthplaces")
+        ):
             sanitized_detail = [
                 {
                     "type": str(err.get("type", "validation_error")),
@@ -79,19 +90,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
                 for err in exc.errors()
             ]
-            calendar_error = next(
-                (
-                    err["type"]
-                    for err in sanitized_detail
-                    if err["type"] in CALENDAR_DATE_ERROR_CODES
-                ),
+            input_error = next(
+                (err["type"] for err in sanitized_detail if err["type"] in _PROFILE_INPUT_CODES),
                 None,
             )
             return JSONResponse(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 content={
                     "detail": sanitized_detail,
-                    **({"code": calendar_error} if calendar_error else {}),
+                    **({"code": input_error} if input_error else {}),
                 },
             )
         return await request_validation_exception_handler(request, exc)

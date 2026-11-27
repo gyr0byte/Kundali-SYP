@@ -127,7 +127,18 @@ export interface BirthProfileCreatePayload {
   entered_date: string;
   time_certainty: TimeCertainty;
   time_local: string | null;
+  location_id?: number;
   place_name: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+}
+
+export interface BirthplaceSuggestion {
+  id: number;
+  name: string;
+  devanagari_names: string[];
+  context: string;
   latitude: number;
   longitude: number;
   timezone: string;

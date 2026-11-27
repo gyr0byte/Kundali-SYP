@@ -113,6 +113,11 @@ const formLabels = {
   formLabelPlaceholder: t.formLabelPlaceholder,
   formInputCalendar: t.formInputCalendar,
   formDate: t.formDate,
+  formDateHint: t.formDateHint,
+  formBsRange: t.formBsRange,
+  formDateErrors: t.formDateErrors,
+  formLocation: t.formLocation,
+  formTimeErrors: t.formTimeErrors,
   formCertainty: t.formCertainty,
   formTime: t.formTime,
   formTimeUnknownNote: t.formTimeUnknownNote,
@@ -160,6 +165,9 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
         mode: "create",
         canCancel: true,
         isAuthenticated: true,
+        locale: "en",
+        searchConfig: {},
+        onInputChange: () => {},
         serverErrors: ["Timezone must be a valid region-based IANA identifier or UTC"],
         onSubmitProfile: () => {},
         onLoadSyntheticSample: () => {},
@@ -172,6 +180,8 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
     assert.match(html, /type="submit"[^>]*>Save Profile</);
     assert.equal(html.includes('type="submit" disabled=""'), false);
     assert.match(html, /role="alert"[^>]*>.*Timezone must be a valid region-based IANA identifier or UTC/);
+    assert.match(html, /role="combobox"/);
+    assert.match(html, /Enter location manually/);
   });
 
   it("renders edit mode prefilled cleanly from saved BS unknown-time profile", () => {
@@ -180,6 +190,9 @@ describe("BirthProfileForm and UserChartWorkspace rendered UI states", () => {
         mode: "edit",
         canCancel: true,
         isAuthenticated: true,
+        locale: "en",
+        searchConfig: {},
+        onInputChange: () => {},
         initialProfile: {
           id: "prof-edit-1",
           label: "Ramesh Pokhara",

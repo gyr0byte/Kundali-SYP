@@ -10,6 +10,7 @@ import pytest
 import app.calc.timeconv as timeconv_mod
 from app.calc.ayanamsha import CalculationError
 from app.calc.timeconv import TimeConversionError, TimeInput, convert_local_to_utc_jd
+from app.calc.timezones import load_timezone
 
 
 def test_julian_day_j2000_epoch() -> None:
@@ -44,6 +45,67 @@ def test_nepal_timezone_45_min_offset() -> None:
     assert result.utc_offset_hours == pytest.approx(5.75, abs=1e-5)
     # 20 + 25/60 = 20.4166667 UT hour on 2006-08-01
     assert result.julian_day == pytest.approx(2453949.3506944, abs=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("local", "utc", "offset_seconds"),
+    [
+        ("1919-12-31T23:48:43", "1919-12-31T18:07:27+00:00", 20476),
+        ("1920-01-01T00:00:00", "1919-12-31T18:30:00+00:00", 19800),
+        ("1985-12-31T23:59:59", "1985-12-31T18:29:59+00:00", 19800),
+        ("1986-01-01T00:15:00", "1985-12-31T18:30:00+00:00", 20700),
+    ],
+)
+def test_nepal_historical_utc_offsets(local: str, utc: str, offset_seconds: int) -> None:
+    wall_time = datetime.datetime.fromisoformat(local)
+    result = convert_local_to_utc_jd(
+        TimeInput(
+            date=wall_time.date(),
+            time=wall_time.time(),
+            latitude=27.7,
+            longitude=85.3,
+            timezone="Asia/Kathmandu",
+        )
+    )
+    assert result.datetime_utc == datetime.datetime.fromisoformat(utc)
+    assert result.utc_offset_hours * 3600 == pytest.approx(offset_seconds)
+
+
+@pytest.mark.parametrize(
+    ("local", "code"),
+    [
+        ("1919-12-31T23:48:44", "dst_overlap"),
+        ("1919-12-31T23:59:59", "dst_overlap"),
+        ("1986-01-01T00:00:00", "dst_gap"),
+        ("1986-01-01T00:14:59", "dst_gap"),
+    ],
+)
+def test_nepal_historical_clock_changes_reject_ambiguous_and_skipped_times(
+    local: str, code: str
+) -> None:
+    wall_time = datetime.datetime.fromisoformat(local)
+    with pytest.raises(TimeConversionError) as error:
+        convert_local_to_utc_jd(
+            TimeInput(
+                date=wall_time.date(),
+                time=wall_time.time(),
+                latitude=27.7,
+                longitude=85.3,
+                timezone="Asia/Kathmandu",
+            )
+        )
+    assert error.value.code == code
+
+
+def test_pinned_timezone_is_loaded_independently_of_system_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import zoneinfo
+
+    monkeypatch.setattr(zoneinfo, "TZPATH", ())
+    assert load_timezone("Asia/Kathmandu").key == "Asia/Kathmandu"
+    with pytest.raises(zoneinfo.ZoneInfoNotFoundError):
+        load_timezone("../UTC")
 
 
 def test_nepal_explicit_utc_offset() -> None:

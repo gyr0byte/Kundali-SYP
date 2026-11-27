@@ -24,7 +24,7 @@ dependencies = [
     "cryptography>=42",
     "apscheduler>=3.10",
     "httpx>=0.27",
-    "tzdata>=2024.1",
+    "tzdata==2026.5",
     "email-validator>=2.3.0",
 ]
 
@@ -55,6 +55,7 @@ namespaces = false
 
 [tool.setuptools.package-data]
 "app.calc" = ["calendar_data/calendar.csv", "calendar_data/LICENSE", "calendar_data/NOTICE"]
+"app.geo" = ["data/nepal.tsv.gz", "data/ATTRIBUTION.md"]
 
 [tool.ruff]
 target-version = "py312"

@@ -8,7 +8,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from typing import Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
@@ -20,8 +20,10 @@ from app.calc.bikram_sambat import (
     normalize_date_text,
     parse_ad_date,
 )
-from app.calc.timeconv import TimeInput, convert_local_to_utc_jd
+from app.calc.timeconv import TimeConversionError, TimeInput, convert_local_to_utc_jd
+from app.calc.timezones import load_timezone
 from app.db.models.profile import InputCalendar, TimeCertainty
+from app.geo.nepal import resolve_birthplace
 
 BsConversionStatus = Literal["resolved", "awaiting_bs_conversion"]
 
@@ -96,7 +98,7 @@ def validate_iana_timezone(value: str) -> str:
         raise ValueError("Timezone must be a valid region-based IANA identifier or UTC")
 
     if cleaned == "UTC":
-        ZoneInfo("UTC")
+        load_timezone("UTC")
         return cleaned
 
     parts = cleaned.split("/")
@@ -106,12 +108,10 @@ def validate_iana_timezone(value: str) -> str:
         raise ValueError("Timezone must be a valid region-based IANA identifier or UTC")
 
     try:
-        zone = ZoneInfo(cleaned)
+        load_timezone(cleaned)
     except (ZoneInfoNotFoundError, ValueError, KeyError):
         raise ValueError("Timezone must be a valid region-based IANA identifier or UTC") from None
 
-    if zone.key != cleaned:
-        raise ValueError("Timezone must be a valid region-based IANA identifier or UTC")
     return cleaned
 
 
@@ -188,15 +188,14 @@ def validate_birth_profile_state(
                     timezone=clean_tz,
                 )
             )
-        except ValueError as exc:
-            msg = str(exc)
-            if "DST gap" in msg:
-                raise ValueError(
-                    "Local birth time falls within a daylight saving time gap"
+        except TimeConversionError as exc:
+            if exc.code == "dst_gap":
+                raise TimeConversionError(
+                    "A clock change skipped this local birth time", code=exc.code
                 ) from None
-            if "DST overlap" in msg:
-                raise ValueError(
-                    "Local birth time falls within an ambiguous daylight saving time overlap"
+            if exc.code == "dst_overlap":
+                raise TimeConversionError(
+                    "A clock change repeated this local birth time", code=exc.code
                 ) from None
             raise ValueError(
                 "Invalid birth date, time, coordinate, or timezone combination"
@@ -217,38 +216,67 @@ def validate_birth_profile_state(
     )
 
 
-class BirthProfileCreate(BaseModel):
-    """Payload to create an encrypted birth profile."""
+class BirthProfileLocationFields(BaseModel):
+    """Accept verified search selections or the existing manual location fields."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    location_id: int | None = Field(default=None, strict=True, gt=0)
+    place_name: str | None = Field(default=None, min_length=1, max_length=200)
+    latitude: float | None = None
+    longitude: float | None = None
+    timezone: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_selected_location(cls, value: object) -> object:
+        if not isinstance(value, dict) or value.get("location_id") is None:
+            return value
+        location_id = value["location_id"]
+        place = resolve_birthplace(location_id) if type(location_id) is int else None
+        if place is None:
+            raise PydanticCustomError("invalid_birthplace", "Select an available birthplace")
+        # Location fields from the request are ignored whenever a selection is supplied.
+        return {
+            **value,
+            "place_name": place.profile_name,
+            "latitude": place.latitude,
+            "longitude": place.longitude,
+            "timezone": place.timezone,
+        }
+
+    @field_validator("latitude")
+    @classmethod
+    def check_latitude(cls, v: float | None) -> float | None:
+        return (
+            None
+            if v is None
+            else _validate_coordinate(v, name="Latitude", minimum=-90.0, maximum=90.0)
+        )
+
+    @field_validator("longitude")
+    @classmethod
+    def check_longitude(cls, v: float | None) -> float | None:
+        return (
+            None
+            if v is None
+            else _validate_coordinate(v, name="Longitude", minimum=-180.0, maximum=180.0)
+        )
+
+    @field_validator("timezone")
+    @classmethod
+    def check_timezone(cls, v: str | None) -> str | None:
+        return None if v is None else validate_iana_timezone(v)
+
+
+class BirthProfileCreate(BirthProfileLocationFields):
+    """Payload to create an encrypted birth profile."""
 
     label: str = Field(min_length=1, max_length=120)
     input_calendar: InputCalendar
     entered_date: str
     time_certainty: TimeCertainty
     time_local: str | None = None
-    place_name: str = Field(min_length=1, max_length=200)
-    latitude: float
-    longitude: float
-    timezone: str
-
-    @field_validator("latitude")
-    @classmethod
-    def check_latitude(cls, v: float) -> float:
-        """Validate latitude bounds without echoing value."""
-        return _validate_coordinate(v, name="Latitude", minimum=-90.0, maximum=90.0)
-
-    @field_validator("longitude")
-    @classmethod
-    def check_longitude(cls, v: float) -> float:
-        """Validate longitude bounds without echoing value."""
-        return _validate_coordinate(v, name="Longitude", minimum=-180.0, maximum=180.0)
-
-    @field_validator("timezone")
-    @classmethod
-    def check_timezone(cls, v: str) -> str:
-        """Validate canonical region-based IANA timezone or UTC."""
-        return validate_iana_timezone(v)
 
     @field_validator("entered_date")
     @classmethod
@@ -264,22 +292,34 @@ class BirthProfileCreate(BaseModel):
             return None
         return validate_time_format(v)
 
+    def validated(self) -> ValidatedProfileData:
+        if (
+            self.place_name is None
+            or self.latitude is None
+            or self.longitude is None
+            or self.timezone is None
+        ):
+            raise PydanticCustomError(
+                "missing_birthplace",
+                "Enter complete manual location details or select a birthplace",
+            )
+        return validate_birth_profile_state(
+            label=self.label,
+            input_calendar=self.input_calendar,
+            entered_date=self.entered_date,
+            time_certainty=self.time_certainty,
+            time_local=self.time_local,
+            place_name=self.place_name,
+            latitude=self.latitude,
+            longitude=self.longitude,
+            timezone=self.timezone,
+        )
+
     @model_validator(mode="after")
     def validate_cross_field_consistency(self) -> BirthProfileCreate:
-        """Validate calendar, certainty, DST transitions, and full profile state."""
         try:
-            validated = validate_birth_profile_state(
-                label=self.label,
-                input_calendar=self.input_calendar,
-                entered_date=self.entered_date,
-                time_certainty=self.time_certainty,
-                time_local=self.time_local,
-                place_name=self.place_name,
-                latitude=self.latitude,
-                longitude=self.longitude,
-                timezone=self.timezone,
-            )
-        except CalendarDateError as exc:
+            validated = self.validated()
+        except (CalendarDateError, TimeConversionError) as exc:
             raise PydanticCustomError(exc.code, str(exc)) from None
         self.label = validated.label
         self.entered_date = validated.entered_date
@@ -291,44 +331,14 @@ class BirthProfileCreate(BaseModel):
         return self
 
 
-class BirthProfileUpdate(BaseModel):
+class BirthProfileUpdate(BirthProfileLocationFields):
     """Partial update payload validated against the merged existing birth profile."""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     label: str | None = Field(default=None, min_length=1, max_length=120)
     input_calendar: InputCalendar | None = None
     entered_date: str | None = None
     time_certainty: TimeCertainty | None = None
     time_local: str | None = None
-    place_name: str | None = Field(default=None, min_length=1, max_length=200)
-    latitude: float | None = None
-    longitude: float | None = None
-    timezone: str | None = None
-
-    @field_validator("latitude")
-    @classmethod
-    def check_latitude(cls, v: float | None) -> float | None:
-        """Validate optional latitude bounds without echoing value."""
-        if v is None:
-            return None
-        return _validate_coordinate(v, name="Latitude", minimum=-90.0, maximum=90.0)
-
-    @field_validator("longitude")
-    @classmethod
-    def check_longitude(cls, v: float | None) -> float | None:
-        """Validate optional longitude bounds without echoing value."""
-        if v is None:
-            return None
-        return _validate_coordinate(v, name="Longitude", minimum=-180.0, maximum=180.0)
-
-    @field_validator("timezone")
-    @classmethod
-    def check_timezone(cls, v: str | None) -> str | None:
-        """Validate optional region-based IANA timezone or UTC."""
-        if v is None:
-            return None
-        return validate_iana_timezone(v)
 
     @field_validator("entered_date")
     @classmethod

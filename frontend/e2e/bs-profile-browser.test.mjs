@@ -5,7 +5,7 @@ import { chromium } from "playwright";
 
 const origin = process.env.KUNDALI_BS_ORIGIN ?? "http://127.0.0.1:3103";
 for (const [locale, language, width] of [["en", "EN", 1440], ["ne", "नेपाली", 375]]) {
-  test(`birth calendar validation and save at ${width}px in ${locale}`, async () => {
+  test(`birthplace selection and calendar validation at ${width}px in ${locale}`, async () => {
     const { userWorkspace: labels } = JSON.parse(
       readFileSync(new URL(`../src/i18n/${locale}.json`, import.meta.url), "utf8")
     );
@@ -25,7 +25,7 @@ for (const [locale, language, width] of [["en", "EN", 1440], ["ne", "नेप�
     const browser = await chromium.launch();
 
     try {
-      const page = await browser.newPage({ viewport: { width, height: 900 }, locale });
+      const page = await browser.newPage({ viewport: { width, height: 900 }, locale, hasTouch: locale === "ne" });
       await page.route("**/api/auth/refresh", (route) => route.fulfill({
         json: { authenticated: true, user, access_token: accessToken, expires_at: exp * 1000 },
       }));
@@ -34,6 +34,19 @@ for (const [locale, language, width] of [["en", "EN", 1440], ["ne", "नेप�
         "access-control-allow-headers": "Authorization, Content-Type",
         "access-control-allow-methods": "GET, POST, OPTIONS",
       };
+      await page.route("**/api/v1/birthplaces/search", async (route) => {
+        if (route.request().method() === "OPTIONS") {
+          return route.fulfill({status: 204, headers: cors});
+        }
+        const { query } = route.request().postDataJSON();
+        if (query === "lookup error") return route.fulfill({status: 503, headers: cors, json: {}});
+        if (query === "no matching place") return route.fulfill({headers: cors, json: []});
+        return route.fulfill({headers: cors, json: [{
+          id: 1283240, name: "Kathmandu", devanagari_names: ["काठमाडौं"],
+          context: "Bagmati Province", latitude: 27.70169, longitude: 85.3206,
+          timezone: "Asia/Kathmandu",
+        }]});
+      });
       await page.route("**/api/v1/profiles**", async (route) => {
         const method = route.request().method();
         if (method === "OPTIONS") {
@@ -78,12 +91,34 @@ for (const [locale, language, width] of [["en", "EN", 1440], ["ne", "नेप�
 
       await page.locator("#bp-label").fill("Browser calendar test");
       await page.locator("#bp-time").fill("08:30");
-      await page.locator("#bp-place").fill("Kathmandu");
-      await page.locator("#bp-tz").fill("Asia/Kathmandu");
-      await page.locator("#bp-lat").fill("27.7");
-      await page.locator("#bp-lon").fill("85.3");
-
       const submit = page.getByRole("button", { name: labels.formSubmit, exact: true });
+      const place = page.getByRole("combobox", {name: labels.formPlace});
+      await place.fill("lookup error");
+      await page.getByText(labels.formLocation.loading, {exact: true}).waitFor();
+      await page.getByText(labels.formLocation.failed, {exact: true}).waitFor();
+      await place.fill("no matching place");
+      await page.getByText(labels.formLocation.empty, {exact: true}).waitFor();
+      const choosePlace = async () => {
+        await place.fill(locale === "ne" ? "काठमाडौं" : "Katmandu");
+        const option = page.getByRole("option", {name: /Kathmandu.*Bagmati Province/});
+        await option.waitFor();
+        if (locale === "en") {
+          await place.press("ArrowDown");
+          assert.equal(await option.getAttribute("aria-selected"), "true");
+          await place.press("Enter");
+        } else {
+          await option.tap();
+        }
+        await page.getByText(labels.formLocation.details, {exact: false}).waitFor();
+      };
+      await choosePlace();
+      await place.fill("no matching place");
+      await page.getByText(labels.formLocation.details, {exact: false}).waitFor({state: "hidden"});
+      await page.getByRole("button", {name: labels.formLocation.manual}).click();
+      await page.locator("#bp-tz").waitFor();
+      assert.equal(await page.locator("#bp-lat").inputValue(), "");
+      await page.getByRole("button", {name: labels.formLocation.search}).click();
+      await choosePlace();
       const date = page.locator("#bp-date");
       const dateBounds = await date.boundingBox();
       assert.ok(dateBounds && dateBounds.x >= 0 && dateBounds.x + dateBounds.width <= width);
@@ -113,6 +148,8 @@ for (const [locale, language, width] of [["en", "EN", 1440], ["ne", "नेप�
       assert.equal(submitted.length, 2);
       assert.equal(submitted[1].entered_date, "2072-01-12");
       assert.equal(submitted[1].input_calendar, "BS");
+      assert.equal(submitted[1].location_id, 1283240);
+      assert.equal(submitted[1].timezone, "Asia/Kathmandu");
       assert.ok(!("date_ad" in submitted[1]));
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     } finally {

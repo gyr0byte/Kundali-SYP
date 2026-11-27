@@ -17,6 +17,7 @@ from app.api.schemas.profile import (
     validate_birth_profile_state,
 )
 from app.calc.bikram_sambat import CalendarDateError
+from app.calc.timeconv import TimeConversionError
 from app.core.clock import Clock
 from app.core.config import Settings
 from app.core.security import (
@@ -151,17 +152,7 @@ def create_profile(
     ip: str | None = None,
 ) -> BirthProfileResponse:
     """Encrypt and persist a new birth profile owned by the caller."""
-    validated = validate_birth_profile_state(
-        label=payload.label,
-        input_calendar=payload.input_calendar,
-        entered_date=payload.entered_date,
-        time_certainty=payload.time_certainty,
-        time_local=payload.time_local,
-        place_name=payload.place_name,
-        latitude=payload.latitude,
-        longitude=payload.longitude,
-        timezone=payload.timezone,
-    )
+    validated = payload.validated()
 
     now = clock.now()
     key = settings.ENCRYPTION_KEY
@@ -304,7 +295,7 @@ def update_profile(
             longitude=merged_lon,
             timezone=merged_tz,
         )
-    except CalendarDateError:
+    except (CalendarDateError, TimeConversionError):
         raise
     except ValueError as exc:
         raise ProfileValidationError(str(exc)) from None

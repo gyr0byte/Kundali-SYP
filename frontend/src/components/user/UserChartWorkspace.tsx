@@ -39,11 +39,13 @@ import {
   classifyWorkspaceAuthError,
   createInitialWorkspaceState,
   createProfileLoadCoordinator,
-  isProfileDateIssue,
+  isProfileInputIssue,
   resolveActiveProfile,
   resolveVisibleProfiles,
   type ProfileWorkspaceState,
   type ProfileDateIssue,
+  type ProfileInputIssue,
+  type ProfileTimeIssue,
 } from "@/lib/kundali/profile-workflow";
 import {
   SAMPLE_NORTH_LONDON_CHART_FACTS,
@@ -236,6 +238,8 @@ export interface WorkspaceMessages {
   formDateHint: string;
   formBsRange: string;
   formDateErrors: Record<ProfileDateIssue, string>;
+  formTimeErrors: Record<ProfileTimeIssue, string>;
+  formLocation: import("./BirthplaceSearch").BirthplaceLabels;
   convertedAdLabel: string;
   formCertainty: string;
   formTime: string;
@@ -334,7 +338,7 @@ export function UserChartWorkspace({
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState<boolean>(false);
   const [sessionFeedback, setSessionFeedback] = useState<LogoutOutcomeBanner | null>(null);
   const [apiErrorBanner, setApiErrorBanner] = useState<string | null>(null);
-  const [formServerErrors, setFormServerErrors] = useState<readonly string[] | ProfileDateIssue>([]);
+  const [formServerErrors, setFormServerErrors] = useState<readonly string[] | ProfileInputIssue>([]);
   const [profileActionNotice, setProfileActionNotice] = useState<
     "profileCreatedNotice" | "profileUpdatedNotice" | "profileDeletedNotice" | null
   >(null);
@@ -784,7 +788,7 @@ export function UserChartWorkspace({
         return;
       }
       if (err instanceof ApiClientError) {
-        if (err.status === 422 && isProfileDateIssue(err.responseCode)) {
+        if (err.status === 422 && isProfileInputIssue(err.responseCode)) {
           setFormServerErrors(err.responseCode);
           return;
         }
@@ -1389,7 +1393,13 @@ export function UserChartWorkspace({
                     isAuthenticated={isAuthenticated}
                     isSubmitting={isSubmittingForm}
                     serverErrors={formServerErrors}
-                    onDateChange={() => {
+                    locale={locale}
+                    searchConfig={{
+                      getAccessToken: effectiveGetAccessToken,
+                      onUnauthorizedRefresh: effectiveOnUnauthorizedRefresh,
+                      baseUrl: apiBaseUrl,
+                    }}
+                    onInputChange={() => {
                       setFormServerErrors((errors) => typeof errors === "string" ? [] : errors);
                     }}
                     onSubmitProfile={handleSubmitProfileForm}
@@ -1410,6 +1420,8 @@ export function UserChartWorkspace({
                       formDateHint: t.formDateHint,
                       formBsRange: t.formBsRange,
                       formDateErrors: t.formDateErrors,
+                      formTimeErrors: t.formTimeErrors,
+                      formLocation: t.formLocation,
                       formCertainty: t.formCertainty,
                       formTime: t.formTime,
                       formTimeUnknownNote: t.formTimeUnknownNote,

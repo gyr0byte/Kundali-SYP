@@ -29,10 +29,23 @@ export type ProfileDateIssue =
   | "birth_date_format" | "invalid_ad_date" | "invalid_bs_date"
   | "bs_date_out_of_range" | "bs_date_unconfirmed";
 
+export type ProfileTimeIssue = "dst_gap" | "dst_overlap";
+export type ProfileLocationIssue = "invalid_birthplace" | "missing_birthplace" | "invalid_manual_location";
+export type ProfileInputIssue = ProfileDateIssue | ProfileTimeIssue | ProfileLocationIssue;
+
 export function isProfileDateIssue(value: string | null | undefined): value is ProfileDateIssue {
   return value === "birth_date_format" || value === "invalid_ad_date" ||
     value === "invalid_bs_date" || value === "bs_date_out_of_range" ||
     value === "bs_date_unconfirmed";
+}
+
+export function isProfileTimeIssue(value: ProfileInputIssue | null): value is ProfileTimeIssue {
+  return value === "dst_gap" || value === "dst_overlap";
+}
+
+export function isProfileInputIssue(value: string | null): value is ProfileInputIssue {
+  return isProfileDateIssue(value) || value === "dst_gap" || value === "dst_overlap" ||
+    value === "invalid_birthplace" || value === "missing_birthplace" || value === "invalid_manual_location";
 }
 
 /**
@@ -71,7 +84,7 @@ export function getInitialProfileFormValues(
 export function validateProfileFormInput(
   values: BirthProfileFormValues
 ): { payload: BirthProfileCreatePayload; error: null } |
-  { payload: null; error: string; dateIssue?: ProfileDateIssue } {
+  { payload: null; error: string; dateIssue?: ProfileDateIssue; locationIssue?: ProfileLocationIssue } {
   const trimmedLabel = values.label.trim();
   if (!trimmedLabel) {
     return { payload: null, error: "Enter a profile label." };
@@ -112,6 +125,7 @@ export function validateProfileFormInput(
     return {
       payload: null,
       error: "Enter an explicit birth place name.",
+      locationIssue: "invalid_manual_location",
     };
   }
 
@@ -120,6 +134,7 @@ export function validateProfileFormInput(
     return {
       payload: null,
       error: "Enter an explicit IANA timezone (e.g., Asia/Kathmandu, Europe/London, or UTC).",
+      locationIssue: "invalid_manual_location",
     };
   }
 
@@ -129,16 +144,17 @@ export function validateProfileFormInput(
     return {
       payload: null,
       error: "Enter explicit latitude and longitude decimal coordinates.",
+      locationIssue: "invalid_manual_location",
     };
   }
 
   const lat = Number(latText);
   const lon = Number(lonText);
   if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
-    return { payload: null, error: "Latitude must be a finite number between -90 and 90." };
+    return { payload: null, error: "Latitude must be a finite number between -90 and 90.", locationIssue: "invalid_manual_location" };
   }
   if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
-    return { payload: null, error: "Longitude must be a finite number between -180 and 180." };
+    return { payload: null, error: "Longitude must be a finite number between -180 and 180.", locationIssue: "invalid_manual_location" };
   }
 
   return {

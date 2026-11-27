@@ -20,6 +20,7 @@ import app.services.chart_service as chart_service_mod
 from app.api.schemas.chart import ChartCalculationRequest, ChartCalculationResponse
 from app.api.schemas.profile import BirthProfileUpdate
 from app.calc.ayanamsha import CalculationError
+from app.calc.bikram_sambat import ad_to_bs
 from app.calc.ephemeris import EphemerisResult, EphemerisSource, calculate_positions
 from app.calc.facts import ENGINE_VERSION, ChartFactSensitivity, compute_chart_facts
 from app.calc.timeconv import TimeConversionError
@@ -32,6 +33,7 @@ from app.core.security import (
     encrypt_text,
 )
 from app.db.models import AstrologerStatus, AuditLog, BirthProfile, ChartSnapshot
+from app.geo.nepal import resolve_birthplace
 from app.services.profile_service import update_profile
 
 
@@ -940,3 +942,106 @@ def test_equivalent_calendars_legacy_resolution_and_snapshot_history(
     assert old["chart"] == bs_result.json()["chart"] and old["is_current_profile_revision"] is False
     new = client.post(f"{bs_path}/chart", headers=headers)
     assert new.status_code == 200 and new.json()["chart"]["chart_id"] != old["chart"]["chart_id"]
+
+
+def test_birthplace_selection_matches_manual_chart_and_updates_snapshot_revision(
+    client: TestClient, user_factory: Any
+) -> None:
+    user = user_factory()
+    headers = _auth_headers(client, user.email)
+    kathmandu = resolve_birthplace(1283240)
+    assert kathmandu is not None
+    manual = _create_profile(
+        client,
+        headers,
+        entered_date="2015-04-25",
+        time_local="08:30",
+        latitude=kathmandu.latitude,
+        longitude=kathmandu.longitude,
+    )
+    selected = _create_profile(
+        client,
+        headers,
+        input_calendar="BS",
+        entered_date="2072-01-12",
+        time_local="08:30",
+        location_id=kathmandu.id,
+        place_name="tampered",
+        latitude="tampered",
+        longitude=0,
+        timezone="America/New_York",
+    )
+    assert selected["date_ad"] == "2015-04-25"
+    assert selected["place_name"] == kathmandu.profile_name
+    assert selected["latitude"] == kathmandu.latitude
+    assert selected["longitude"] == kathmandu.longitude
+    assert selected["timezone"] == "Asia/Kathmandu"
+
+    profile_path = f"/api/v1/profiles/{selected['id']}"
+    selected_chart = client.post(f"{profile_path}/chart", headers=headers)
+    manual_chart = client.post(f"/api/v1/profiles/{manual['id']}/chart", headers=headers)
+    assert selected_chart.status_code == manual_chart.status_code == 200
+    assert selected_chart.json()["chart"] == manual_chart.json()["chart"]
+    snapshot_url = selected_chart.headers["location"]
+    assert snapshot_url != manual_chart.headers["location"]
+    original = client.get(snapshot_url, headers=headers).json()
+    assert original["is_current_profile_revision"]
+
+    invalid = client.patch(profile_path, json={"location_id": 1}, headers=headers)
+    assert invalid.status_code == 422 and invalid.json()["code"] == "invalid_birthplace"
+    assert client.get(snapshot_url, headers=headers).json()["is_current_profile_revision"]
+    updated = client.patch(
+        profile_path,
+        json={"location_id": 1282898, "longitude": -90},
+        headers=headers,
+    )
+    assert updated.status_code == 200
+    pokhara = resolve_birthplace(1282898)
+    assert pokhara is not None and updated.json()["longitude"] == pokhara.longitude
+    historic = client.get(snapshot_url, headers=headers).json()
+    assert historic["is_current_profile_revision"] is False
+    assert historic["chart"] == original["chart"]
+    latest = client.post(f"{profile_path}/chart", headers=headers)
+    assert latest.status_code == 200
+    assert latest.headers["location"] != snapshot_url
+    assert latest.json()["chart"]["chart_id"] != historic["chart"]["chart_id"]
+
+
+def test_search_and_historical_clock_errors_are_bounded_and_sanitized(
+    client: TestClient, user_factory: Any
+) -> None:
+    endpoint = "/api/v1/birthplaces/search"
+    assert client.post(endpoint, json={"query": "Kathmandu"}).status_code == 401
+    user = user_factory()
+    headers = _auth_headers(client, user.email)
+    search = client.post(endpoint, json={"query": "काठमाडौं"}, headers=headers)
+    assert search.status_code == 200 and search.json()[0]["id"] == 1283240
+    assert search.headers["cache-control"] == "no-store"
+    long_query = "A" * 81
+    rejected = client.post(endpoint, json={"query": long_query}, headers=headers)
+    assert rejected.status_code == 422 and long_query not in rejected.text
+
+    bs_date = ad_to_bs(datetime(1986, 1, 1).date()).isoformat()
+    payload = {
+        "label": "Historical fixture",
+        "location_id": 1283240,
+        "input_calendar": "BS",
+        "entered_date": bs_date,
+        "time_certainty": "exact",
+        "time_local": "00:10",
+    }
+    gap = client.post("/api/v1/profiles", json=payload, headers=headers)
+    assert gap.status_code == 422 and gap.json()["code"] == "dst_gap"
+    assert bs_date not in gap.text and "00:10" not in gap.text
+    created = client.post(
+        "/api/v1/profiles",
+        json={**payload, "time_local": "00:15"},
+        headers=headers,
+    )
+    assert created.status_code == 201 and created.json()["date_ad"] == "1986-01-01"
+    updated = client.patch(
+        f"/api/v1/profiles/{created.json()['id']}",
+        json={"input_calendar": "AD", "entered_date": "1919-12-31", "time_local": "23:50"},
+        headers=headers,
+    )
+    assert updated.status_code == 422 and updated.json()["code"] == "dst_overlap"

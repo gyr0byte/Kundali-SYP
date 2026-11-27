@@ -76,11 +76,8 @@ class ChartCalculationFailureError(RuntimeError):
 def _map_time_conversion_error(exc: TimeConversionError) -> ChartTimeInputError:
     """Translate TimeConversionError into a sanitized PII-free domain error."""
     messages_by_code = {
-        "dst_gap": "Birth time falls within a daylight saving time gap for the profile timezone.",
-        "dst_overlap": (
-            "Birth time falls within an ambiguous daylight saving time overlap "
-            "for the profile timezone."
-        ),
+        "dst_gap": "A clock change skipped this local birth time in the profile timezone.",
+        "dst_overlap": "A clock change repeated this local birth time in the profile timezone.",
         "invalid_timezone": "Birth profile timezone is invalid or unsupported.",
         "invalid_coordinates": "Birth profile coordinates are out of valid geographic bounds.",
         "invalid_utc_offset": "Birth profile UTC offset is invalid.",

@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import datetime
 import math
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from swisseph_ffi import SE_GREG_CAL  # type: ignore[import-untyped]
 
 from app.calc.ayanamsha import SWE_LOCK, CalculationError, get_swe_engine
+from app.calc.timezones import load_timezone
 
 
 class TimeConversionError(ValueError):
@@ -155,8 +156,8 @@ def convert_local_to_utc_jd(inp: TimeInput) -> TimeConversionResult:
         if not tz_clean:
             raise TimeConversionError("Invalid IANA timezone name.", code="invalid_timezone")
         try:
-            tz = ZoneInfo(tz_clean)
-        except Exception as exc:
+            tz = load_timezone(tz_clean)
+        except ZoneInfoNotFoundError as exc:
             raise TimeConversionError(
                 f"Invalid IANA timezone name: {inp.timezone}",
                 code="invalid_timezone",
@@ -172,16 +173,14 @@ def convert_local_to_utc_jd(inp: TimeInput) -> TimeConversionResult:
         # Detect nonexistent times (DST gap, e.g. clocks jumped forward 2:00 -> 3:00)
         if not rt0_ok and not rt1_ok:
             raise TimeConversionError(
-                f"Nonexistent local time in DST gap: {naive_dt} in {tz_clean}. "
-                "This wall-clock time was skipped by daylight saving.",
+                f"Nonexistent local time: {naive_dt} in {tz_clean}. A clock change skipped it.",
                 code="dst_gap",
             )
 
         # Detect ambiguous times (DST overlap, e.g. clocks turned back 2:00 -> 1:00)
         if dt_fold0.utcoffset() != dt_fold1.utcoffset():
             raise TimeConversionError(
-                f"Ambiguous local time in DST overlap: {naive_dt} in {tz_clean}. "
-                "Specify exact UTC offset or disambiguated time.",
+                f"Ambiguous local time: {naive_dt} in {tz_clean}. A clock change repeated it.",
                 code="dst_overlap",
             )
 

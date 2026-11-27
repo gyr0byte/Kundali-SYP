@@ -167,6 +167,81 @@ owner reviews and successfully saves it. Unsupported dates return a safe
 validation error and leave the profile unchanged. A successful save uses the
 existing revision mechanism. Historical snapshots retain their recorded facts.
 
+### Birthplace selection and historical timezones
+
+The authenticated `POST /api/v1/birthplaces/search` accepts a JSON `query`
+of 2–80 characters with at least one letter and returns up to 12 results with
+`Cache-Control: no-store`. It searches the packaged Nepal subset by primary or
+alternate name, then prefix or word prefix. A name followed by an
+administrative area, such as `Rampur Udayapur`, narrows matching places.
+Population, normalized name and
+GeoNames ID break ties. Administrative names and coordinates distinguish
+places with the same name. Devanagari names come from the source's untagged
+alternate-name field and can include variants from more than one language.
+
+The source is the GeoNames Nepal country extract dated 2026-11-27, licensed
+under CC BY 4.0. The 3,459,581-byte archive produces a 282,413-byte compressed
+table of 10,284 populated places. The extraction retains named towns, villages
+and selected localities with aliases or population, along with available
+administrative context from the same archive. Places missing from the subset,
+including border records whose source timezone is outside Nepal, can be added
+manually with verified coordinates and an IANA timezone.
+[Dataset attribution and source checksum](../../backend/app/geo/data/ATTRIBUTION.md),
+[reproducible extraction](../../scripts/build_nepal_gazetteer.py).
+
+`POST /api/v1/profiles` and `PATCH /api/v1/profiles/{profile_id}` accept an
+optional numeric `location_id`. The server replaces any submitted location
+name, coordinates, and timezone with the resolved record. Manual entry retains
+the existing validation rules. Profiles store the same encrypted fields and
+revision as before. Saved profiles and chart calculations are independent of
+the gazetteer. No database migration is needed.
+
+After BS-to-AD normalization, the time conversion layer uses Python
+`zoneinfo` with pinned `tzdata==2026.5` (IANA release 2026e). The same data is
+read on Windows and deployment hosts regardless of the system timezone
+database. IANA records `Asia/Kathmandu` as UTC+05:41:16 before 1920,
+UTC+05:30 until 1986, and UTC+05:45 from 1986. The 1920 rollback repeats
+23:48:44 through 23:59:59 on December 31, 1919. The 1986 change skips
+00:00:00 through 00:14:59 on January 1. The same validation rejects
+international clock gaps and overlaps. Kundali does not choose a fold for
+an ambiguous birth time.
+
+Historical rules describe representative locations. Coverage is less
+complete before 1970 and can be corrected in later releases. A tzdata
+upgrade that changes the resolved UTC instant also changes the chart
+fingerprint and its snapshot lookup key, even within the same profile
+revision. Snapshots record the resolved UTC instant and offset. The tzdata
+release is pinned for the deployment but is not recorded per snapshot or
+included independently in the fingerprint. A release change that produces
+the same result can reuse the same snapshot. Historical snapshot contents
+remain as recorded.
+[IANA Nepal rules](https://data.iana.org/time-zones/tzdb-2026e/asia),
+[IANA data scope](https://data.iana.org/time-zones/tzdb-2026e/theory.html).
+
+Search covers Nepal. International locations require manual entry.
+Settlement coordinates represent the named place. Use manual entry for
+verified coordinates of the actual birth location. Nepali aliases depend on
+source availability.
+
+Offline verification passed 127 backend tests, 23 frontend tests, and two
+mocked Playwright checks. The source distribution and wheels contained the
+dataset and attribution, and search and timezone lookup passed from an
+extracted wheel.
+
+Live Playwright verification used the restricted development PostgreSQL role
+at 1440 × 900 in English and 375 × 812 in Nepali. Keyboard and touch
+selection, trusted coordinates and timezone, and AD and BS creation passed.
+Equivalent profiles produced identical chart facts. A birthplace edit cleared
+the displayed chart and preserved its historical snapshot. A label-only edit
+preserved the saved location. Manual international entry, reopening and
+calculating a saved profile, historical Nepal gap rejection, and international
+DST overlap rejection passed. The browser reported zero uncaught JavaScript
+errors, network failures, or horizontal overflow.
+
+The three synthetic profiles were deleted and all four known snapshot URLs
+returned HTTP 404. One synthetic development account and its audit history
+remain. The browser verification did not independently query audit records.
+
 ### Supported calculation dates
 
 Profile calculation uses the normalized Gregorian instant. It accepts dates where

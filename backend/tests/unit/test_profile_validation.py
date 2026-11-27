@@ -153,7 +153,7 @@ def test_dst_gap_and_overlap_rejected_for_resolved_dates() -> None:
             )
         )
     gap_msg = str(exc_gap.value.errors(include_input=False))
-    assert "daylight saving time gap" in gap_msg.lower()
+    assert "clock change skipped" in gap_msg.lower()
     assert "2024-03-10" not in gap_msg
     assert "02:30" not in gap_msg
     assert "America/New_York" not in gap_msg
@@ -172,7 +172,7 @@ def test_dst_gap_and_overlap_rejected_for_resolved_dates() -> None:
             )
         )
     overlap_msg = str(exc_overlap.value.errors(include_input=False))
-    assert "daylight saving time overlap" in overlap_msg.lower()
+    assert "clock change repeated" in overlap_msg.lower()
     assert "2024-11-03" not in overlap_msg
     assert "01:30" not in overlap_msg
 
@@ -190,7 +190,7 @@ def test_dst_gap_and_overlap_rejected_for_resolved_dates() -> None:
     )
     assert unknown_on_dst.time_local is None
 
-    with pytest.raises(ValidationError, match="daylight saving time gap"):
+    with pytest.raises(ValidationError, match="clock change skipped"):
         BirthProfileCreate.model_validate(
             _valid_create_kwargs(
                 input_calendar="BS",

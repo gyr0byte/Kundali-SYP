@@ -3,6 +3,7 @@ import type {
   BirthProfileCreatePayload,
   BirthProfileListResponse,
   BirthProfileUpdatePayload,
+  BirthplaceSuggestion,
   BsConversionStatus,
   CalendarType,
   TimeCertainty,
@@ -78,6 +79,7 @@ export function toCreateProfilePayload(
     entered_date: input.entered_date.trim(),
     time_certainty: input.time_certainty,
     time_local: input.time_certainty === "unknown" ? null : (input.time_local?.trim() ?? null),
+    ...(input.location_id === undefined ? {} : { location_id: input.location_id }),
     place_name: input.place_name.trim(),
     latitude: input.latitude,
     longitude: input.longitude,
@@ -112,6 +114,9 @@ export function toUpdateProfilePayload(
   if (input.place_name !== undefined) {
     payload.place_name = input.place_name.trim();
   }
+  if (input.location_id !== undefined) {
+    payload.location_id = input.location_id;
+  }
   if (input.latitude !== undefined) {
     payload.latitude = input.latitude;
   }
@@ -123,6 +128,14 @@ export function toUpdateProfilePayload(
   }
 
   return payload;
+}
+
+export function searchBirthplaces(
+  config: ApiClientConfig,
+  query: string,
+  signal: AbortSignal,
+): Promise<BirthplaceSuggestion[]> {
+  return apiRequest("/birthplaces/search", { method: "POST", body: { query }, config, signal });
 }
 
 export async function listProfiles(
