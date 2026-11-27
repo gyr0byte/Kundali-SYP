@@ -70,6 +70,38 @@ To apply migrations, run the Alembic command above from `backend` without `--sql
 
 The migrator needs `USAGE` and `CREATE` on the target schema and ownership, directly or through an approved owner role, of objects that it alters or drops. Database-wide CREATE and broader role memberships are unnecessary for ordinary table migrations. Check extension-specific grants separately when a future migration installs or updates an extension. Explicitly grant the runtime role the intended access to newly created objects from the owning role and verify the effective grants. Keep DDL with the migrator and preserve audit append-only and migration-history read-only access. Alembic currently emits a generic sanitized error on live failure. A future improvement is to report the operation stage and allowlisted SQLSTATE without exception text, query parameters, or connection details.
 
+### BS profile migration
+
+Revision `0005_resolved_bs_profiles` replaces the check constraint on
+`birth_profiles` so a BS profile can store its encrypted Gregorian date. AD
+profiles still require an encrypted Gregorian date. The migrator needs
+ownership of `birth_profiles`. Existing runtime grants cover the change.
+Legacy pending BS rows stay pending until their owner successfully saves them.
+The migration does not backfill rows or rewrite snapshots. Downgrade refuses
+to restore the old constraint while resolved BS rows exist.
+
+The populated PostgreSQL migration regression passed in 10.51 seconds. It
+verified that upgrading from `0004` preserves encrypted AD and unresolved BS
+profiles, their revisions, and the existing AD snapshot. The new constraint
+accepted a resolved BS profile and rejected invalid calendar states.
+Development migration `0005` and the readiness checker both exited 0.
+The checker confirmed verified TLS, revision `0005`, and installed pgvector.
+
+Live Playwright verification used the restricted development runtime role
+with English at 1440 × 900 and Nepali at 375 × 812. Registration, login,
+profile creation, Nepali digit input, server conversion, date validation,
+editing, recalculation, and deletion passed. Equivalent AD and BS inputs
+produced identical chart facts and fingerprints with distinct snapshot UUIDs.
+Editing invalidated the active result and retained its historical snapshot.
+Both profiles were deleted and all three snapshot URLs returned HTTP 404.
+The browser reported zero uncaught JavaScript errors, network failures, or
+horizontal overflow.
+
+Two synthetic development accounts remain. The browser smoke test did not
+independently query the resulting audit entries. Mobile planetary labels
+still need more spacing in crowded chart cells. Live verification covers
+the workflows and viewport sizes above.
+
 ### Chart snapshot migration and grants
 
 Revision `0004_chart_snapshots` adds a profile revision counter and the `chart_snapshots` table. Existing profiles start at revision `1`. The migrator needs ownership of `public.birth_profiles` and `CREATE` on the target schema. After the migration, the table owner grants the development runtime role the following privileges:

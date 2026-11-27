@@ -96,12 +96,10 @@ def _map_time_conversion_error(exc: TimeConversionError) -> ChartTimeInputError:
 
 def _validate_supported_profile_state(profile: BirthProfile) -> None:
     """Enforce unsupported-state checks before decrypting or invoking Swiss Ephemeris."""
-    if profile.input_calendar == InputCalendar.BS:
+    if profile.input_calendar == InputCalendar.BS and profile.date_ad_enc is None:
         raise ChartProfileConflictError(
             code="AWAITING_BS_CONVERSION",
-            detail=(
-                "Chart calculation is unavailable until Bikram Sambat date conversion is supported."
-            ),
+            detail=("Review and save the birth date to resolve this legacy Bikram Sambat profile."),
         )
     if profile.time_certainty == TimeCertainty.UNKNOWN:
         raise ChartProfileConflictError(
@@ -115,12 +113,10 @@ def _validate_supported_profile_state(profile: BirthProfile) -> None:
 
 def _ensure_complete_decrypted_inputs(calc_inputs: ProfileCalcInputs) -> tuple[str, str, str]:
     """Verify decrypted calculation fields are complete before constructing TimeInput."""
-    if calc_inputs.input_calendar == InputCalendar.BS:
+    if calc_inputs.input_calendar == InputCalendar.BS and calc_inputs.date_ad is None:
         raise ChartProfileConflictError(
             code="AWAITING_BS_CONVERSION",
-            detail=(
-                "Chart calculation is unavailable until Bikram Sambat date conversion is supported."
-            ),
+            detail=("Review and save the birth date to resolve this legacy Bikram Sambat profile."),
         )
     if not calc_inputs.date_ad or not calc_inputs.date_ad.strip():
         raise ChartProfileConflictError(

@@ -100,6 +100,73 @@ Each stored v1 document contains the original engine fingerprint, resolved setti
 
 Repeated results reuse the same row within a profile revision and snapshot schema version. The preparation read transaction ends before native calculation. A short PostgreSQL parent-row lock serializes snapshot insertion with profile edits and deletions, and the uniqueness constraint is the final duplicate guard. Every successful profile PATCH advances the revision, including metadata-only edits. A stale calculation returns `409 PROFILE_CHANGED` and writes nothing. Historical snapshots remain until the parent profile is deleted, which cascades to snapshots and their embedded facts. Snapshot history is accessible by UUID only, with no listing UI. Several snapshots can match the current profile revision, including results from earlier engine versions or different settings. Direct SQL edits to birth data must preserve the revision contract. AI interpretation, Dasha calculations and knowledge retrieval remain unimplemented.
 
+### Bikram Sambat civil dates
+
+Birth profiles accept Gregorian (AD) and Nepali Bikram Sambat (BS) dates as
+`YYYY-MM-DD`, including Devanagari digits. The backend stores the entered
+calendar and date, canonicalized to ASCII digits, and encrypts both the entered
+date and normalized Gregorian date. The calendar module provides conversion in
+both directions. Calculation uses the normalized AD date and then applies the
+existing local-time, timezone, and astronomical pipeline.
+
+Kundali calendar data version `kundali-bs-v1` uses the 11 KiB CSV distributed
+with [sambat 0.1.0](https://pypi.org/project/sambat/0.1.0/), pinned to
+[`32014630fb0fd63937736f4fe3b9d81d519b0d17`](https://github.com/rjach/sambat/tree/32014630fb0fd63937736f4fe3b9d81d519b0d17/data).
+The CSV is redistributed under Apache License 2.0 with the upstream LICENSE
+and NOTICE. Python's standard library reads the local file at runtime. The
+backend wheel and source distribution include all three files. The upstream
+project has a short release history, so Kundali pins the data and checks
+reference dates before changing versions.
+
+Upstream checked BS 2081 against Surya Panchanga and 2082–2083 against Nepal's
+national Panchang. Earlier rows largely reflect agreement among published
+software tables, many of which share ancestry. The supported span is
+**BS 1975-01-01 through 2083-12-30**, corresponding to
+**AD 1918-04-13 through 2027-04-13**, inclusive. Both directions reject the
+following intervals because the source tables disagree on their month
+boundaries.
+
+| Excluded BS months | Excluded AD dates, inclusive |
+| --- | --- |
+| 1989 months 7–8 | 1932-10-17 to 1932-12-14 |
+| 1991 months 8–9 | 1934-11-16 to 1935-01-13 |
+| 1993 months 3–4 | 1936-06-14 to 1936-08-15 |
+| 2004 months 9–10 | 1947-12-16 to 1948-02-12 |
+
+Nepal Rastra Bank's Jestha 2062 interest-rate report pairs `2062/02/01`
+with May 15, 2005, in two bank entries and `2062/02/05` with May 19,
+2005, in another. It also pairs `2062/01/01` with April 14, 2005. This
+contemporaneous official record supports the pinned civil boundary of May 14
+as Baishakh 31 and May 15 as Jestha 1. The NTA archive lists a Baishakh
+report ending May 14, but its listing starts April 15, so it does not
+establish the starting day. Dates beyond the table are rejected without
+extrapolation.
+[Nepal Rastra Bank report](https://www.nrb.org.np/contents/uploads/2019/12/Interest_Rate_Structure_of_Commercial_Banks-2062-02.pdf),
+[NTA report index](https://old.nta.gov.np/mispdf),
+[Upstream provenance and discrepancies](https://github.com/rjach/sambat/blob/32014630fb0fd63937736f4fe3b9d81d519b0d17/data/README.md).
+
+Reference tests use published dates from the UNCTAD/ICC Nepal holiday
+schedule, Nepal Rastra Bank, Nepal's Ministry of Foreign Affairs, and Nepal's
+diplomatic missions in Tokyo, Cairo and Kolkata. Round-trip tests also cover
+every supported day. These checks verify the reference dates and internal
+consistency. Most early dates remain supported by table consensus.
+[UNCTAD/ICC holiday schedule](https://unctad.org/system/files/official-document/iteiia20032_en.pdf),
+[Ministry earthquake report](https://mofa.gov.np/content/211/post-earthquake-relief--rehabilitation-and-reconstruction-measures-government/),
+[Tokyo holiday schedule](https://giwmscdnone.gov.np/media/pdf_upload/Holidays_tfzd83p.pdf),
+[Cairo holiday schedule](https://eg.nepalembassy.gov.np/pages/holidays/),
+[Kolkata holiday schedule](https://giwmscdntwo.gov.np/media/pdf_upload/Image_003_6ifesjj.pdf).
+
+Initial verification passed 97 backend tests and 23 frontend tests. The
+targeted calendar review passed 31 tests and verified the CSV and attribution
+files in the source distribution, direct wheel, and wheel rebuilt from the
+source distribution. An isolated wheel import successfully converted
+`2062-02-01` to `2005-05-15`.
+
+A legacy BS profile without an encrypted AD date remains pending until its
+owner reviews and successfully saves it. Unsupported dates return a safe
+validation error and leave the profile unchanged. A successful save uses the
+existing revision mechanism. Historical snapshots retain their recorded facts.
+
 ### Supported calculation dates
 
 Profile calculation uses the normalized Gregorian instant. It accepts dates where

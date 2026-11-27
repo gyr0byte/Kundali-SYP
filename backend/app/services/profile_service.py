@@ -16,6 +16,7 @@ from app.api.schemas.profile import (
     BsConversionStatus,
     validate_birth_profile_state,
 )
+from app.calc.bikram_sambat import CalendarDateError
 from app.core.clock import Clock
 from app.core.config import Settings
 from app.core.security import (
@@ -303,6 +304,8 @@ def update_profile(
             longitude=merged_lon,
             timezone=merged_tz,
         )
+    except CalendarDateError:
+        raise
     except ValueError as exc:
         raise ProfileValidationError(str(exc)) from None
 

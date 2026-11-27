@@ -130,7 +130,7 @@ def test_full_crud_lifecycle_and_encrypted_persistence(
     ):
         assert sensitive_bytes not in raw_joined
 
-    # 2. Create second profile (BS pending, unknown time) and verify pagination
+    # 2. Create a resolved BS profile with unknown time and verify pagination
     create_2 = client.post(
         "/api/v1/profiles",
         json={
@@ -150,8 +150,8 @@ def test_full_crud_lifecycle_and_encrypted_persistence(
     data_2 = create_2.json()
     assert data_2["input_calendar"] == "BS"
     assert data_2["entered_date"] == "2055-04-15"
-    assert data_2["date_ad"] is None
-    assert data_2["bs_conversion_status"] == "awaiting_bs_conversion"
+    assert data_2["date_ad"] == "1998-07-31"
+    assert data_2["bs_conversion_status"] == "resolved"
     assert data_2["time_certainty"] == "unknown"
     assert data_2["time_local"] is None
 
@@ -340,17 +340,17 @@ def test_time_certainty_and_calendar_patch_transitions(
     )
     assert bad_clear_time.status_code == 422
 
-    # Switching AD -> BS clears date_ad and sets awaiting_bs_conversion
+    # Switching AD -> BS recomputes the encrypted Gregorian date.
     to_bs = client.patch(
         f"/api/v1/profiles/{pid}",
-        json={"input_calendar": "BS", "entered_date": "2055-04-32"},
+        json={"input_calendar": "BS", "entered_date": "2082-03-32"},
         headers=headers,
     )
     assert to_bs.status_code == 200
     assert to_bs.json()["input_calendar"] == "BS"
-    assert to_bs.json()["entered_date"] == "2055-04-32"
-    assert to_bs.json()["date_ad"] is None
-    assert to_bs.json()["bs_conversion_status"] == "awaiting_bs_conversion"
+    assert to_bs.json()["entered_date"] == "2082-03-32"
+    assert to_bs.json()["date_ad"] == "2025-07-16"
+    assert to_bs.json()["bs_conversion_status"] == "resolved"
 
     # Attempting BS -> AD without changing invalid Gregorian day 32 fails on merged state
     bad_bs_to_ad = client.patch(

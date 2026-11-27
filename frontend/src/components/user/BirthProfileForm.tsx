@@ -5,6 +5,7 @@ import { COMMON_TIMEZONES } from "@/lib/kundali/constants";
 import {
   getInitialProfileFormValues,
   validateProfileFormInput,
+  type ProfileDateIssue,
 } from "@/lib/kundali/profile-workflow";
 import type {
   BirthProfile,
@@ -19,7 +20,8 @@ interface BirthProfileFormProps {
   canCancel: boolean;
   isAuthenticated: boolean;
   isSubmitting?: boolean;
-  serverErrors?: readonly string[];
+  serverErrors?: readonly string[] | ProfileDateIssue;
+  onDateChange: () => void;
   onSubmitProfile: (payload: BirthProfileCreatePayload) => Promise<void> | void;
   onLoadSyntheticSample: () => void;
   onCancel?: () => void;
@@ -32,6 +34,9 @@ interface BirthProfileFormProps {
     formLabelPlaceholder: string;
     formInputCalendar: string;
     formDate: string;
+    formDateHint: string;
+    formBsRange: string;
+    formDateErrors: Record<ProfileDateIssue, string>;
     formCertainty: string;
     formTime: string;
     formTimeUnknownNote: string;
@@ -62,6 +67,7 @@ export function BirthProfileForm({
   isAuthenticated,
   isSubmitting = false,
   serverErrors = [],
+  onDateChange,
   onSubmitProfile,
   onLoadSyntheticSample,
   onCancel,
@@ -79,6 +85,7 @@ export function BirthProfileForm({
   const [latitude, setLatitude] = useState(initialValues.latitude);
   const [longitude, setLongitude] = useState(initialValues.longitude);
   const [clientError, setClientError] = useState<string | null>(null);
+  const [dateIssue, setDateIssue] = useState<ProfileDateIssue | null>(null);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -99,19 +106,20 @@ export function BirthProfileForm({
     });
 
     if (validation.error || !validation.payload) {
-      setClientError(validation.error);
+      setDateIssue(validation.dateIssue ?? null);
+      setClientError(validation.dateIssue ? null : validation.error);
       return;
     }
 
+    setDateIssue(null);
     setClientError(null);
     await onSubmitProfile(validation.payload);
   }
 
-  const displayedErrors = clientError
+  const visibleDateIssue = dateIssue ?? (typeof serverErrors === "string" ? serverErrors : null);
+  const displayedErrors = visibleDateIssue ? [labels.formDateErrors[visibleDateIssue]] : clientError
     ? [clientError]
-    : serverErrors.length > 0
-      ? serverErrors
-      : [];
+    : typeof serverErrors === "string" ? [] : serverErrors;
 
   const titleText = mode === "edit" ? labels.editFormTitle : labels.formTitle;
   const submitText = isSubmitting
@@ -155,6 +163,7 @@ export function BirthProfileForm({
       <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs" noValidate>
         {displayedErrors.length > 0 ? (
           <div
+            id="bp-errors"
             role="alert"
             className="rounded border border-[var(--kundali-crimson-border)] bg-[var(--kundali-crimson-bg)] px-3 py-2 font-medium text-[var(--kundali-crimson)]"
           >
@@ -200,7 +209,11 @@ export function BirthProfileForm({
                   key={cal}
                   type="button"
                   aria-pressed={inputCalendar === cal}
-                  onClick={() => setInputCalendar(cal)}
+                  onClick={() => {
+                    setInputCalendar(cal);
+                    setDateIssue(null);
+                    onDateChange();
+                  }}
                   className={`rounded border px-3 py-2 font-semibold ${
                     inputCalendar === cal
                       ? "border-[var(--kundali-navy)] bg-[var(--kundali-navy)] text-[var(--kundali-cream)]"
@@ -220,13 +233,21 @@ export function BirthProfileForm({
             <input
               id="bp-date"
               type="text"
-              inputMode="numeric"
               required
+              aria-invalid={visibleDateIssue !== null}
+              aria-describedby={visibleDateIssue ? "bp-date-hint bp-errors" : "bp-date-hint"}
               value={enteredDate}
-              onChange={(e) => setEnteredDate(e.target.value)}
+              onChange={(e) => {
+                setEnteredDate(e.target.value);
+                setDateIssue(null);
+                onDateChange();
+              }}
               placeholder="YYYY-MM-DD"
               className="mt-1 w-full rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-3 py-2 font-mono text-sm text-[var(--kundali-ink)]"
             />
+            <p id="bp-date-hint" className="mt-1 text-[11px] leading-relaxed text-[var(--kundali-muted)]">
+              {labels.formDateHint}{inputCalendar === "BS" ? ` ${labels.formBsRange}` : ""}
+            </p>
           </div>
 
           <div>

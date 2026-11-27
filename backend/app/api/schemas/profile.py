@@ -11,16 +11,21 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
+from app.calc.bikram_sambat import (
+    BikramSambatDate,
+    CalendarDateError,
+    bs_to_ad,
+    normalize_date_text,
+    parse_ad_date,
+)
 from app.calc.timeconv import TimeInput, convert_local_to_utc_jd
 from app.db.models.profile import InputCalendar, TimeCertainty
 
 BsConversionStatus = Literal["resolved", "awaiting_bs_conversion"]
 
-_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _TIME_PATTERN = re.compile(r"^\d{2}:\d{2}(?::\d{2})?$")
-_BS_YEAR_MIN = 1900
-_BS_YEAR_MAX = 2200
 
 # Canonical continent/ocean region prefixes recognized by IANA tzdb (plus explicit "UTC").
 _IANA_REGIONS: frozenset[str] = frozenset(
@@ -112,12 +117,10 @@ def validate_iana_timezone(value: str) -> str:
 
 def validate_date_format(value: str) -> str:
     """Validate YYYY-MM-DD syntax without echoing the submitted date."""
-    if not isinstance(value, str):
-        raise ValueError("Birth date must use YYYY-MM-DD format")
-    cleaned = value.strip()
-    if not _DATE_PATTERN.fullmatch(cleaned):
-        raise ValueError("Birth date must use YYYY-MM-DD format")
-    return cleaned
+    try:
+        return normalize_date_text(value)
+    except CalendarDateError as exc:
+        raise PydanticCustomError(exc.code, str(exc)) from None
 
 
 def validate_time_format(value: str) -> str:
@@ -152,35 +155,13 @@ def validate_birth_profile_state(
     clean_lat = _validate_coordinate(latitude, name="Latitude", minimum=-90.0, maximum=90.0)
     clean_lon = _validate_coordinate(longitude, name="Longitude", minimum=-180.0, maximum=180.0)
     clean_tz = validate_iana_timezone(timezone)
-    clean_date = validate_date_format(entered_date)
+    clean_date = normalize_date_text(entered_date)
 
-    # Calendar validation: BS performs format + broad numeric bounds only until bikram_sambat.py.
-    parsed_ad_date: datetime.date | None = None
-    date_ad_str: str | None
-    bs_status: BsConversionStatus
-
-    if input_calendar == InputCalendar.AD:
-        try:
-            parsed_ad_date = datetime.date.fromisoformat(clean_date)
-        except ValueError:
-            raise ValueError("Invalid Gregorian AD birth date") from None
-        date_ad_str = clean_date
-        bs_status = "resolved"
-    else:
-        year_str, month_str, day_str = clean_date.split("-")
-        year_num = int(year_str)
-        month_num = int(month_str)
-        day_num = int(day_str)
-        if not (_BS_YEAR_MIN <= year_num <= _BS_YEAR_MAX):
-            raise ValueError(
-                f"Bikram Sambat birth year must be between {_BS_YEAR_MIN} and {_BS_YEAR_MAX}"
-            )
-        if not (1 <= month_num <= 12):
-            raise ValueError("Bikram Sambat birth month must be between 1 and 12")
-        if not (1 <= day_num <= 32):
-            raise ValueError("Bikram Sambat birth day must be between 1 and 32")
-        date_ad_str = None
-        bs_status = "awaiting_bs_conversion"
+    parsed_ad_date = (
+        parse_ad_date(clean_date)
+        if input_calendar == InputCalendar.AD
+        else bs_to_ad(BikramSambatDate.parse(clean_date))
+    )
 
     # Birth-time certainty validation: keep unknown strictly separate from clock times.
     clean_time: str | None
@@ -196,12 +177,7 @@ def validate_birth_profile_state(
         parsed_time = datetime.time.fromisoformat(clean_time)
 
     # Reject impossible DST gaps and ambiguous DST overlaps for resolved single-instant AD times.
-    if (
-        input_calendar == InputCalendar.AD
-        and parsed_ad_date is not None
-        and time_certainty in (TimeCertainty.EXACT, TimeCertainty.APPROXIMATE)
-        and parsed_time is not None
-    ):
+    if parsed_time is not None:
         try:
             convert_local_to_utc_jd(
                 TimeInput(
@@ -230,8 +206,8 @@ def validate_birth_profile_state(
         label=clean_label,
         input_calendar=input_calendar,
         entered_date=clean_date,
-        date_ad=date_ad_str,
-        bs_conversion_status=bs_status,
+        date_ad=parsed_ad_date.isoformat(),
+        bs_conversion_status="resolved",
         time_certainty=time_certainty,
         time_local=clean_time,
         place_name=clean_place,
@@ -291,17 +267,20 @@ class BirthProfileCreate(BaseModel):
     @model_validator(mode="after")
     def validate_cross_field_consistency(self) -> BirthProfileCreate:
         """Validate calendar, certainty, DST transitions, and full profile state."""
-        validated = validate_birth_profile_state(
-            label=self.label,
-            input_calendar=self.input_calendar,
-            entered_date=self.entered_date,
-            time_certainty=self.time_certainty,
-            time_local=self.time_local,
-            place_name=self.place_name,
-            latitude=self.latitude,
-            longitude=self.longitude,
-            timezone=self.timezone,
-        )
+        try:
+            validated = validate_birth_profile_state(
+                label=self.label,
+                input_calendar=self.input_calendar,
+                entered_date=self.entered_date,
+                time_certainty=self.time_certainty,
+                time_local=self.time_local,
+                place_name=self.place_name,
+                latitude=self.latitude,
+                longitude=self.longitude,
+                timezone=self.timezone,
+            )
+        except CalendarDateError as exc:
+            raise PydanticCustomError(exc.code, str(exc)) from None
         self.label = validated.label
         self.entered_date = validated.entered_date
         self.time_local = validated.time_local

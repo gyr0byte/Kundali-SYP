@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "kundali-backend"
 version = "0.1.0"
@@ -38,6 +42,19 @@ dev = [
     "mypy>=1.10",
     "import-linter>=2",
 ]
+
+[tool.uv]
+package = false
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["app", "app.*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"app.calc" = ["calendar_data/calendar.csv", "calendar_data/LICENSE", "calendar_data/NOTICE"]
 
 [tool.ruff]
 target-version = "py312"

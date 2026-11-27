@@ -64,13 +64,12 @@ def test_validate_iana_timezone_rejects_abbreviations_and_invalid_ids(bad_tz: st
         assert bad_tz.strip() not in str(exc_info.value)
 
 
-def test_bs_calendar_broad_bounds_and_awaiting_conversion_state() -> None:
-    """BS dates receive format and broad numeric checks and preserve date_ad=None."""
-    # Day 32 is valid in some BS months; broad bounds accept 1..32 without claiming exact calendar.
+def test_bs_calendar_exact_validation_and_conversion() -> None:
+    """Validate the actual month length and convert all supported inputs."""
     validated = validate_birth_profile_state(
         label="BS Profile",
         input_calendar=InputCalendar.BS,
-        entered_date="2055-04-32",
+        entered_date="२०८२-०३-३२",
         time_certainty=TimeCertainty.EXACT,
         time_local="06:15:30",
         place_name="Patan, Nepal",
@@ -78,8 +77,9 @@ def test_bs_calendar_broad_bounds_and_awaiting_conversion_state() -> None:
         longitude=85.3188,
         timezone="Asia/Kathmandu",
     )
-    assert validated.date_ad is None
-    assert validated.bs_conversion_status == "awaiting_bs_conversion"
+    assert validated.entered_date == "2082-03-32"
+    assert validated.date_ad == "2025-07-16"
+    assert validated.bs_conversion_status == "resolved"
     assert validated.time_local == "06:15:30"
 
     # Out-of-bounds BS year, month, and day fail cleanly without echoing submitted date
@@ -90,6 +90,7 @@ def test_bs_calendar_broad_bounds_and_awaiting_conversion_state() -> None:
         "2055-13-15",
         "2055-04-00",
         "2055-04-33",
+        "2055-04-32",
     )
     for bad_bs in bad_bs_dates:
         with pytest.raises(ValueError) as exc_info:
@@ -136,8 +137,8 @@ def test_unknown_vs_exact_approximate_time_certainty() -> None:
         assert bad_time not in str(exc_time.value.errors(include_input=False))
 
 
-def test_dst_gap_and_overlap_rejected_only_for_resolved_ad_times() -> None:
-    """AD exact/approximate reject DST gaps and overlaps; unknown and BS stay decoupled."""
+def test_dst_gap_and_overlap_rejected_for_resolved_dates() -> None:
+    """Exact/approximate AD and converted BS times reject DST gaps and overlaps."""
     # Spring forward gap in America/New_York: 2024-03-10 02:30 does not exist
     with pytest.raises(ValidationError) as exc_gap:
         BirthProfileCreate(
@@ -189,17 +190,16 @@ def test_dst_gap_and_overlap_rejected_only_for_resolved_ad_times() -> None:
     )
     assert unknown_on_dst.time_local is None
 
-    # BS profile does not apply AD Gregorian DST checks prior to BS->AD conversion
-    bs_profile = BirthProfileCreate(
-        **_valid_create_kwargs(
-            input_calendar="BS",
-            entered_date="2080-03-10",
-            time_certainty="exact",
-            time_local="02:30",
-            timezone="America/New_York",
+    with pytest.raises(ValidationError, match="daylight saving time gap"):
+        BirthProfileCreate.model_validate(
+            _valid_create_kwargs(
+                input_calendar="BS",
+                entered_date="2080-11-27",
+                time_certainty="exact",
+                time_local="02:30",
+                timezone="America/New_York",
+            )
         )
-    )
-    assert bs_profile.input_calendar == InputCalendar.BS
 
 
 @pytest.mark.parametrize(

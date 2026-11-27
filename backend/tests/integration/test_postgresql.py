@@ -1,9 +1,12 @@
 """Opt-in integration checks. Use a fresh, independently selected disposable database."""
 
+from __future__ import annotations
+
 import os
 import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
 from threading import Event
@@ -15,9 +18,11 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect, select, text
-from sqlalchemy.engine import URL, Engine
+from psycopg.errors import CheckViolation
+from sqlalchemy import insert, inspect, select, text, update
+from sqlalchemy.engine import URL, Connection, Engine, Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -85,7 +90,7 @@ def test_disposable_guard_rejects_wrong_target(
 
 
 @pytest.fixture(scope="module")
-def migrated_engine() -> Iterator[Engine]:
+def migrated_database() -> Iterator[MigratedDatabase]:
     if os.environ.get("KUNDALI_RUN_POSTGRES_TESTS") != "1":
         pytest.skip("Disposable PostgreSQL integration is opt-in.")
 
@@ -122,8 +127,10 @@ def migrated_engine() -> Iterator[Engine]:
             cfg = Config(str(BACKEND / "alembic.ini"))
             cfg.set_main_option("script_location", str(BACKEND / "migrations"))
             cfg.attributes["connection"] = connection
+            command.upgrade(cfg, "0004_chart_snapshots")
+            legacy = _seed_legacy_profiles(connection)
             command.upgrade(cfg, "head")
-        yield engine
+        yield MigratedDatabase(engine, legacy)
     except Exception:
         pytest.fail(
             "Disposable PostgreSQL setup failed. Check the target and permissions privately.",
@@ -134,6 +141,106 @@ def migrated_engine() -> Iterator[Engine]:
             engine.dispose()
 
 
+@dataclass(frozen=True)
+class LegacyProfiles:
+    ad_id: uuid.UUID
+    bs_id: uuid.UUID
+    profiles: list[Row[Any]]
+    snapshot: Row[Any]
+    normalized_bs_date: bytes
+
+
+@dataclass(frozen=True)
+class MigratedDatabase:
+    engine: Engine
+    legacy: LegacyProfiles
+
+
+def _migration_profile_rows(
+    connection: Connection, ad_id: uuid.UUID, bs_id: uuid.UUID
+) -> list[Row[Any]]:
+    return list(
+        connection.execute(
+            select(BirthProfile.__table__)
+            .where(BirthProfile.id.in_((ad_id, bs_id)))
+            .order_by(BirthProfile.id)
+        )
+    )
+
+
+def _seed_legacy_profiles(connection: Connection) -> LegacyProfiles:
+    owner_id, ad_id, bs_id = (uuid.uuid4() for _ in range(3))
+    key = Fernet.generate_key()
+    cipher = Fernet(key)
+    connection.execute(
+        insert(User).values(
+            id=owner_id,
+            email="migration-0005@example.com",
+            password_hash="disabled-test-login",
+            is_active=False,
+        )
+    )
+    fields = {
+        "owner_id": owner_id,
+        "label_enc": cipher.encrypt(b"Synthetic migration profile"),
+        "time_certainty": "exact",
+        "time_local_enc": cipher.encrypt(b"12:00"),
+        "place_name_enc": cipher.encrypt(b"Synthetic place"),
+        "latitude_enc": cipher.encrypt(b"27.7"),
+        "longitude_enc": cipher.encrypt(b"85.3"),
+        "timezone_enc": cipher.encrypt(b"Asia/Kathmandu"),
+    }
+    connection.execute(
+        insert(BirthProfile).values(
+            **fields,
+            id=ad_id,
+            revision=3,
+            input_calendar="AD",
+            entered_date_enc=cipher.encrypt(b"2000-01-01"),
+            date_ad_enc=cipher.encrypt(b"2000-01-01"),
+        )
+    )
+    connection.execute(
+        insert(BirthProfile).values(
+            **fields,
+            id=bs_id,
+            revision=7,
+            input_calendar="BS",
+            entered_date_enc=cipher.encrypt(b"2072-01-12"),
+            date_ad_enc=None,
+        )
+    )
+    settings = Settings.model_construct(ENCRYPTION_KEY=key.decode("ascii"))
+    with Session(connection, join_transaction_mode="create_savepoint") as session:
+        profile = session.get(BirthProfile, ad_id)
+        assert profile is not None
+        result = calculate_profile_chart(
+            profile, owner_id=owner_id, calc_settings=ChartSettings(), app_settings=settings
+        )
+        snapshot_id = persist_chart_snapshot(
+            session,
+            result,
+            profile_revision=profile.revision,
+            owner_id=owner_id,
+            app_settings=settings,
+        )
+    snapshot = connection.execute(
+        select(ChartSnapshot.__table__).where(ChartSnapshot.id == snapshot_id)
+    ).one()
+    return LegacyProfiles(
+        ad_id,
+        bs_id,
+        _migration_profile_rows(connection, ad_id, bs_id),
+        snapshot,
+        cipher.encrypt(b"2015-04-25"),
+    )
+
+
+@pytest.fixture(scope="module")
+def migrated_engine(migrated_database: MigratedDatabase) -> Engine:
+    return migrated_database.engine
+
+
 @pytest.fixture
 def db_session(migrated_engine: Engine) -> Iterator[Session]:
     # App services commit. Use the one-use migrated database instead of a rollback-only fixture.
@@ -141,11 +248,45 @@ def db_session(migrated_engine: Engine) -> Iterator[Session]:
         yield session
 
 
+def test_migration_0005_preserves_legacy_profiles_and_snapshot(
+    migrated_database: MigratedDatabase,
+) -> None:
+    legacy = migrated_database.legacy
+    with migrated_database.engine.connect() as connection:
+        assert _migration_profile_rows(connection, legacy.ad_id, legacy.bs_id) == legacy.profiles
+        assert (
+            connection.execute(
+                select(ChartSnapshot.__table__).where(ChartSnapshot.id == legacy.snapshot.id)
+            ).one()
+            == legacy.snapshot
+        )
+        # The connection rolls these probes back so the module's data remains unchanged.
+        assert (
+            connection.scalar(
+                update(BirthProfile)
+                .where(BirthProfile.id == legacy.bs_id)
+                .values(date_ad_enc=legacy.normalized_bs_date)
+                .returning(BirthProfile.date_ad_enc)
+            )
+            == legacy.normalized_bs_date
+        )
+        for values, constraint in (
+            ({"date_ad_enc": None}, "check_birth_profile_calendar_date_ad"),
+            ({"input_calendar": "XX"}, "check_birth_profile_input_calendar"),
+        ):
+            with pytest.raises(IntegrityError) as error, connection.begin_nested():
+                connection.execute(
+                    update(BirthProfile).where(BirthProfile.id == legacy.ad_id).values(**values)
+                )
+            assert isinstance(error.value.orig, CheckViolation)
+            assert error.value.orig.diag.constraint_name == constraint
+
+
 def test_migrations_match_models_and_install_vector(migrated_engine: Engine) -> None:
     with migrated_engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM public.alembic_version"))
-            == "0004_chart_snapshots"
+            == "0005_resolved_bs_profiles"
         )
         assert connection.scalar(
             text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")

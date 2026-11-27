@@ -464,6 +464,7 @@ def test_chart_endpoint_auth_rbac_and_cross_user_isolation(
 
 def test_chart_endpoint_409_blocked_states_without_calc_invocation(
     client: TestClient,
+    db_session: Session,
     user_factory: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -480,6 +481,10 @@ def test_chart_endpoint_409_blocked_states_without_calc_invocation(
         time_certainty="exact",
         time_local="08:30",
     )
+    legacy = db_session.get(BirthProfile, uuid.UUID(bs_profile["id"]))
+    assert legacy is not None
+    legacy.date_ad_enc = None
+    db_session.commit()
     unknown_profile = _create_profile(
         client,
         headers,
@@ -887,3 +892,51 @@ def test_snapshot_identity_preserves_engine_version_and_revision(
         client.get(renamed.headers["location"], headers=headers).json()["chart"]
         == renamed.json()["chart"]
     )
+
+
+def test_equivalent_calendars_legacy_resolution_and_snapshot_history(
+    client: TestClient, db_session: Session, user_factory: Any
+) -> None:
+    user = user_factory()
+    headers = _auth_headers(client, user.email)
+    ad = _create_profile(client, headers, entered_date="2015-04-25")
+    bs = _create_profile(client, headers, input_calendar="BS", entered_date="२०७२-०१-१२")
+    assert bs["entered_date"] == "2072-01-12" and bs["date_ad"] == "2015-04-25"
+    ad_path = f"/api/v1/profiles/{ad['id']}"
+    bs_path = f"/api/v1/profiles/{bs['id']}"
+    legacy = db_session.get(BirthProfile, uuid.UUID(bs["id"]))
+    assert legacy is not None and legacy.date_ad_enc != b"2015-04-25"
+    legacy.date_ad_enc = None
+    db_session.commit()
+    assert (
+        client.get(bs_path, headers=headers).json()["bs_conversion_status"]
+        == "awaiting_bs_conversion"
+    )
+    assert (
+        client.post(f"{bs_path}/chart", headers=headers).json()["code"] == "AWAITING_BS_CONVERSION"
+    )
+    rejected = client.patch(bs_path, json={"entered_date": "2072-01-33"}, headers=headers)
+    assert rejected.status_code == 422 and rejected.json()["code"] == "invalid_bs_date"
+    assert "2072-01-33" not in rejected.text
+    assert client.get(bs_path, headers=headers).json()["date_ad"] is None
+    assert (
+        client.patch(bs_path, json={"entered_date": "2072-01-12"}, headers=headers).json()[
+            "date_ad"
+        ]
+        == "2015-04-25"
+    )
+
+    ad_result = client.post(f"{ad_path}/chart", headers=headers)
+    bs_result = client.post(f"{bs_path}/chart", headers=headers)
+    assert ad_result.status_code == bs_result.status_code == 200
+    assert ad_result.json()["chart"] == bs_result.json()["chart"]
+    assert ad_result.headers["location"] != bs_result.headers["location"]
+    original = bs_result.headers["location"]
+    assert (
+        client.patch(bs_path, json={"entered_date": "2072-01-13"}, headers=headers).status_code
+        == 200
+    )
+    old = client.get(original, headers=headers).json()
+    assert old["chart"] == bs_result.json()["chart"] and old["is_current_profile_revision"] is False
+    new = client.post(f"{bs_path}/chart", headers=headers)
+    assert new.status_code == 200 and new.json()["chart"]["chart_id"] != old["chart"]["chart_id"]

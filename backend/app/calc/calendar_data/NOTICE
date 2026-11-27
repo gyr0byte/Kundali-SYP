@@ -1,0 +1,11 @@
+sambat
+Copyright 2026 Rojan Acharya and the sambat contributors
+
+This product includes software developed by the sambat contributors
+(https://github.com/rjach/sambat), licensed under the Apache License 2.0.
+
+The Bikram Sambat month-length table in data/calendar.csv was compiled from
+published panchangs (including the national panchang of the Nepal Panchanga
+Nirnayak Bikas Samiti, Government of Nepal) and cross-checked against the
+open-source datasets listed in data/sources.toml. Calendar dates are facts;
+no third-party code is included.

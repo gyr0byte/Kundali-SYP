@@ -263,6 +263,30 @@ describe("Birth profile form defaults and multi-profile workflow state", () => {
     assert.match(emptyCoordResult.error ?? "", /latitude and longitude/i);
   });
 
+  it("validates Gregorian leap days and sends normalized BS input for authoritative conversion", () => {
+    const values = {
+      ...getInitialProfileFormValues(null),
+      label: "Synthetic calendar profile",
+      timeLocal: "08:30",
+      placeName: "Kathmandu",
+      timezone: "Asia/Kathmandu",
+      latitude: "27.7",
+      longitude: "85.3",
+    };
+    const validate = (inputCalendar, enteredDate) =>
+      validateProfileFormInput({ ...values, inputCalendar, enteredDate });
+
+    assert.equal(validate("AD", "2000-02-29").payload?.entered_date, "2000-02-29");
+    assert.equal(validate("AD", "1900-02-29").dateIssue, "invalid_ad_date");
+    assert.equal(validate("BS", "२०८४-०१-०१").dateIssue, "bs_date_out_of_range");
+    assert.equal(validate("BS", "2072-1-12").dateIssue, "birth_date_format");
+    assert.equal(validate("BS", "2072-13-12").dateIssue, "invalid_bs_date");
+    const { payload } = validate("BS", "२०७२-०१-१२");
+    assert.equal(payload?.entered_date, "2072-01-12");
+    assert.equal(payload?.input_calendar, "BS");
+    assert.ok(!("date_ad" in payload));
+  });
+
   it("manages create, select, edit, delete, and synthetic sample preview independently", () => {
     const profileA = {
       id: "aaaa-1",

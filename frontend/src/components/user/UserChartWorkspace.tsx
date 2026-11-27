@@ -39,9 +39,11 @@ import {
   classifyWorkspaceAuthError,
   createInitialWorkspaceState,
   createProfileLoadCoordinator,
+  isProfileDateIssue,
   resolveActiveProfile,
   resolveVisibleProfiles,
   type ProfileWorkspaceState,
+  type ProfileDateIssue,
 } from "@/lib/kundali/profile-workflow";
 import {
   SAMPLE_NORTH_LONDON_CHART_FACTS,
@@ -231,6 +233,10 @@ export interface WorkspaceMessages {
   formLabelPlaceholder: string;
   formInputCalendar: string;
   formDate: string;
+  formDateHint: string;
+  formBsRange: string;
+  formDateErrors: Record<ProfileDateIssue, string>;
+  convertedAdLabel: string;
   formCertainty: string;
   formTime: string;
   formTimeUnknownNote: string;
@@ -328,7 +334,7 @@ export function UserChartWorkspace({
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState<boolean>(false);
   const [sessionFeedback, setSessionFeedback] = useState<LogoutOutcomeBanner | null>(null);
   const [apiErrorBanner, setApiErrorBanner] = useState<string | null>(null);
-  const [formServerErrors, setFormServerErrors] = useState<readonly string[]>([]);
+  const [formServerErrors, setFormServerErrors] = useState<readonly string[] | ProfileDateIssue>([]);
   const [profileActionNotice, setProfileActionNotice] = useState<
     "profileCreatedNotice" | "profileUpdatedNotice" | "profileDeletedNotice" | null
   >(null);
@@ -778,6 +784,10 @@ export function UserChartWorkspace({
         return;
       }
       if (err instanceof ApiClientError) {
+        if (err.status === 422 && isProfileDateIssue(err.responseCode)) {
+          setFormServerErrors(err.responseCode);
+          return;
+        }
         const authClass = classifyWorkspaceAuthError({
           errorCode: err.code,
           liveSessionStatus:
@@ -960,6 +970,11 @@ export function UserChartWorkspace({
                 {summaryProfile.entered_date}
                 {summaryProfile.time_local ? ` · ${summaryProfile.time_local}` : ""}
               </span>
+              {summaryProfile.input_calendar === "BS" && summaryProfile.date_ad ? (
+                <span className="rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2 py-0.5">
+                  {t.convertedAdLabel} <time dateTime={summaryProfile.date_ad} className="font-mono">{summaryProfile.date_ad}</time>
+                </span>
+              ) : null}
               <span className="rounded border border-[var(--kundali-border)] bg-[var(--kundali-surface)] px-2 py-0.5 [overflow-wrap:anywhere]">
                 {summaryProfile.place_name}
               </span>
@@ -1374,6 +1389,9 @@ export function UserChartWorkspace({
                     isAuthenticated={isAuthenticated}
                     isSubmitting={isSubmittingForm}
                     serverErrors={formServerErrors}
+                    onDateChange={() => {
+                      setFormServerErrors((errors) => typeof errors === "string" ? [] : errors);
+                    }}
                     onSubmitProfile={handleSubmitProfileForm}
                     onLoadSyntheticSample={handleLoadSample}
                     onCancel={() => {
@@ -1389,6 +1407,9 @@ export function UserChartWorkspace({
                       formLabelPlaceholder: t.formLabelPlaceholder,
                       formInputCalendar: t.formInputCalendar,
                       formDate: t.formDate,
+                      formDateHint: t.formDateHint,
+                      formBsRange: t.formBsRange,
+                      formDateErrors: t.formDateErrors,
                       formCertainty: t.formCertainty,
                       formTime: t.formTime,
                       formTimeUnknownNote: t.formTimeUnknownNote,

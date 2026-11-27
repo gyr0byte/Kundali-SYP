@@ -49,8 +49,7 @@ class BirthProfile(Base):
             name="check_birth_profile_time_local_certainty",
         ),
         CheckConstraint(
-            "(input_calendar = 'BS' AND date_ad_enc IS NULL) "
-            "OR (input_calendar = 'AD' AND date_ad_enc IS NOT NULL)",
+            "input_calendar = 'BS' OR date_ad_enc IS NOT NULL",
             name="check_birth_profile_calendar_date_ad",
         ),
     )

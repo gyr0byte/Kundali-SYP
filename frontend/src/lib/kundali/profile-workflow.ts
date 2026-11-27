@@ -25,6 +25,16 @@ export interface BirthProfileFormValues {
   longitude: string;
 }
 
+export type ProfileDateIssue =
+  | "birth_date_format" | "invalid_ad_date" | "invalid_bs_date"
+  | "bs_date_out_of_range" | "bs_date_unconfirmed";
+
+export function isProfileDateIssue(value: string | null | undefined): value is ProfileDateIssue {
+  return value === "birth_date_format" || value === "invalid_ad_date" ||
+    value === "invalid_bs_date" || value === "bs_date_out_of_range" ||
+    value === "bs_date_unconfirmed";
+}
+
 /**
  * Blank defaults for new birth profiles. Never prefills Kathmandu, coordinates,
  * timezone, or birth dates; all identity and location inputs must be explicit.
@@ -60,15 +70,33 @@ export function getInitialProfileFormValues(
 
 export function validateProfileFormInput(
   values: BirthProfileFormValues
-): { payload: BirthProfileCreatePayload; error: null } | { payload: null; error: string } {
+): { payload: BirthProfileCreatePayload; error: null } |
+  { payload: null; error: string; dateIssue?: ProfileDateIssue } {
   const trimmedLabel = values.label.trim();
   if (!trimmedLabel) {
     return { payload: null, error: "Enter a profile label." };
   }
 
-  const trimmedDate = values.enteredDate.trim();
+  const trimmedDate = values.enteredDate.trim().replace(/[०-९]/g, (digit) =>
+    String(digit.charCodeAt(0) - "०".charCodeAt(0))
+  );
   if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmedDate)) {
-    return { payload: null, error: "Enter birth date in YYYY-MM-DD format." };
+    return { payload: null, error: "Enter birth date in YYYY-MM-DD format.", dateIssue: "birth_date_format" };
+  }
+  const [year, month, day] = trimmedDate.split("-").map(Number);
+  if (values.inputCalendar === "AD") {
+    const date = new Date(`${trimmedDate}T00:00:00.000Z`);
+    if (year === 0 || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== trimmedDate) {
+      return { payload: null, error: "Invalid Gregorian AD birth date.", dateIssue: "invalid_ad_date" };
+    }
+  } else {
+    if (year < 1975 || year > 2083) {
+      return { payload: null, error: "Bikram Sambat year is out of range.", dateIssue: "bs_date_out_of_range" };
+    }
+    // Month-specific lengths, conversions and historical exclusions are server-owned.
+    if (month < 1 || month > 12 || day < 1 || day > 32) {
+      return { payload: null, error: "Invalid Bikram Sambat month or day.", dateIssue: "invalid_bs_date" };
+    }
   }
 
   const trimmedTime = values.timeLocal.trim();

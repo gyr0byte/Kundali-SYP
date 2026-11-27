@@ -13,6 +13,7 @@ from app.api.schemas.profile import (
     BirthProfileResponse,
     BirthProfileUpdate,
 )
+from app.calc.bikram_sambat import CalendarDateError
 from app.core.clock import Clock
 from app.core.config import Settings
 from app.core.dependencies import (
@@ -153,7 +154,7 @@ def patch_birth_profile(
             settings=settings,
             ip=_client_ip(request),
         )
-    except ProfileValidationError as exc:
+    except (ProfileValidationError, CalendarDateError) as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
@@ -163,7 +164,8 @@ def patch_birth_profile(
                         "loc": ["body"],
                         "msg": str(exc),
                     }
-                ]
+                ],
+                **({"code": exc.code} if isinstance(exc, CalendarDateError) else {}),
             },
         )
     except ProfileStorageError:

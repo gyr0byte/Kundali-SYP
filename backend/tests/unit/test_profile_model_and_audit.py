@@ -182,17 +182,15 @@ def test_birth_profile_check_constraints_and_fk_enforced(db_session: Session) ->
         db_session.commit()
     db_session.rollback()
 
-    # 4. BS calendar with non-null date_ad_enc must fail
-    bad_bs = _make_encrypted_profile(
+    # 4. Resolved BS profiles can store the encrypted AD date.
+    resolved_bs = _make_encrypted_profile(
         owner_id=user.id,
         input_calendar=InputCalendar.BS,
         entered_date="2055-04-15",
         date_ad="1998-07-31",
     )
-    db_session.add(bad_bs)
-    with pytest.raises(IntegrityError):
-        db_session.commit()
-    db_session.rollback()
+    db_session.add(resolved_bs)
+    db_session.commit()
 
     # 5. AD calendar with null date_ad_enc must fail
     bad_ad = _make_encrypted_profile(
@@ -308,8 +306,8 @@ def test_alembic_discovery_and_offline_sql_generation(monkeypatch: pytest.Monkey
 
     script_dir = ScriptDirectory.from_config(cfg)
     heads = script_dir.get_heads()
-    assert heads == ["0004_chart_snapshots"]
-    assert script_dir.get_revision(heads[0]).down_revision == "0003_enable_pgvector"
+    assert heads == ["0005_resolved_bs_profiles"]
+    assert script_dir.get_revision(heads[0]).down_revision == "0004_chart_snapshots"
     assert (
         script_dir.get_revision("0003_enable_pgvector").down_revision == "0002_birth_profiles_table"
     )
@@ -336,7 +334,8 @@ def test_alembic_discovery_and_offline_sql_generation(monkeypatch: pytest.Monkey
     downgrade_buf = io.StringIO()
     cfg_down = Config(str(alembic_ini), stdout=downgrade_buf)
     cfg_down.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
-    command.downgrade(cfg_down, "0004_chart_snapshots:0001_initial_auth_tables", sql=True)
+    assert "CHECK (input_calendar = 'BS' OR date_ad_enc IS NOT NULL)" in upgrade_sql
+    command.downgrade(cfg_down, "0005_resolved_bs_profiles:0001_initial_auth_tables", sql=True)
     downgrade_sql = downgrade_buf.getvalue()
     assert "DROP INDEX" in downgrade_sql
     assert "DROP TABLE birth_profiles" in downgrade_sql
