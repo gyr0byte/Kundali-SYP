@@ -1,6 +1,6 @@
 """FastAPI application entry point."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, Request, status
@@ -73,6 +73,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_v1.include_router(profiles_router)
     api_v1.include_router(charts_router)
     app.include_router(api_v1)
+
+    @app.middleware("http")
+    async def prevent_dasha_caching(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/api/v1/charts/") and path.rstrip("/").endswith("/dasha"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def profile_sanitized_validation_handler(

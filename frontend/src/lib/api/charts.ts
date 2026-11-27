@@ -6,6 +6,7 @@ export function calculateChart(
   profile: BirthProfile,
   settings: ChartSettings,
   signal?: AbortSignal,
+  onSnapshot?: (snapshotId: string | null) => void,
 ): Promise<ChartCalculationResponse> {
   if (profile.is_synthetic_sample || profile.id === "sample_north_london" || !profile.updated_at) {
     throw new ApiClientError({
@@ -29,7 +30,15 @@ export function calculateChart(
     body,
     config,
     signal,
+    onHeaders: onSnapshot
+      ? (headers) => onSnapshot(snapshotIdFromLocation(headers.get("Location")))
+      : undefined,
   });
+}
+
+function snapshotIdFromLocation(location: string | null): string | null {
+  const pattern = /^\/api\/v1\/charts\/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})$/i;
+  return pattern.exec(location ?? "")?.[1]?.toLowerCase() ?? null;
 }
 
 export function matchesChartProfile(result: ChartCalculationResponse, profile: BirthProfile): boolean {

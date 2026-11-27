@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useOptionalAuthSession } from "@/components/auth/AuthSessionProvider";
 import { calculateChart, getChartIssue, matchesChartProfile, type ChartIssue } from "@/lib/api/charts";
+import { DashaTimeline, type DashaLabels } from "./DashaTimeline";
 import { ApiClientError } from "@/lib/api/client";
 import {
   createProfile,
@@ -84,7 +85,7 @@ export interface WorkspaceMessages {
   navigationToggle: string;
   accountMenu: string;
   plannedHeading: string;
-  plannedDasha: string;
+  dasha: DashaLabels;
   plannedTransits: string;
   plannedAi: string;
   plannedCompatibility: string;
@@ -305,7 +306,7 @@ function getSamplePreview(
 type ChartRun =
   | { status: "idle" | "loading" }
   | { status: "error"; issue: ChartIssue }
-  | { status: "success"; result: ChartCalculationResponse };
+  | { status: "success"; result: ChartCalculationResponse; snapshotId: string | null };
 
 export function UserChartWorkspace({
   messagesByLocale,
@@ -414,6 +415,9 @@ export function UserChartWorkspace({
   const result = chartRun.status === "success" ? chartRun.result : null;
   const moon = result?.time_certainty === "unknown" ? result.moon : null;
   const chart = result && result.time_certainty !== "unknown" ? result.chart : samplePreview.chart;
+  const natal = result && result.time_certainty !== "unknown" ? result.chart : null;
+  const snapshotId = chartRun.status === "success" ? chartRun.snapshotId : null;
+  const dashaNeedsRecalculation = natal !== null && natal.settings.year_days !== appliedSettings.year_days;
   const calcState = result ? "ready" : samplePreview.state;
   const resolvedSettings = chart?.settings ?? appliedSettings;
   const provenanceStatus = moon?.ephemeris_source ?? getProvenanceStatus(chart, calcState);
@@ -428,14 +432,15 @@ export function UserChartWorkspace({
     const context = { context: chartContext, provider: getAccessToken };
     setChartState({ ...context, run: { status: "loading" } });
     try {
+      let snapshot: string | null = null;
       const response = await calculateChart({
         getAccessToken: effectiveGetAccessToken,
         onUnauthorizedRefresh: effectiveOnUnauthorizedRefresh,
         baseUrl: apiBaseUrl,
-      }, chartProfile, appliedSettings, request.signal);
+      }, chartProfile, appliedSettings, request.signal, (id) => { snapshot = id; });
       if (request.signal.aborted) return;
       const run: ChartRun = matchesChartProfile(response, chartProfile)
-        ? { status: "success", result: response }
+        ? { status: "success", result: response, snapshotId: snapshot }
         : { status: "error", issue: "profileChanged" };
       setChartState({ ...context, run });
     } catch (error: unknown) {
@@ -1156,7 +1161,7 @@ export function UserChartWorkspace({
             <div className="mt-7 border-t border-[var(--kundali-border)] px-3 pt-5 text-sm text-[var(--kundali-muted)]">
               <p className="font-semibold text-[var(--kundali-navy)]">{t.plannedHeading}</p>
               <ul className="mt-2 space-y-2 leading-relaxed">
-                {[t.plannedDasha, t.plannedTransits, t.plannedAi, t.plannedCompatibility].map((label) => <li key={label}>{label}</li>)}
+                {[t.plannedTransits, t.plannedAi, t.plannedCompatibility].map((label) => <li key={label}>{label}</li>)}
               </ul>
             </div>
           </div>
@@ -1756,6 +1761,22 @@ export function UserChartWorkspace({
                   </dl>
                 </details>
               ) : null}
+              {!activeProfile.is_synthetic_sample && (natal && snapshotId && !dashaNeedsRecalculation ? (
+                <DashaTimeline key={snapshotId} snapshotId={snapshotId} chartId={natal.chart_id}
+                  locale={locale} labels={t.dasha} config={{
+                    getAccessToken: effectiveGetAccessToken,
+                    onUnauthorizedRefresh: effectiveOnUnauthorizedRefresh,
+                    baseUrl: apiBaseUrl,
+                  }} />
+              ) : (
+                <section aria-label={t.dasha.title} className="rounded border border-[var(--kundali-border)] bg-white p-4">
+                  <h2 className="text-lg font-semibold text-[var(--kundali-navy)]">{t.dasha.title}</h2>
+                  <p className="mt-2 text-sm text-[var(--kundali-muted)]">
+                    {unknownTimeMode ? t.dasha.unknown : dashaNeedsRecalculation ? t.dasha.recalculate
+                      : natal ? t.dasha.missingSnapshot : t.dasha.calculate}
+                  </p>
+                </section>
+              ))}
               {!activeProfile.is_synthetic_sample && (
                 <button type="button" onClick={handleLoadSample} className="min-h-11 rounded px-2 text-sm font-semibold text-[var(--kundali-navy)] underline underline-offset-4">
                   {t.syntheticPreviewButton}

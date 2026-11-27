@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { calculateChart, getChartIssue, matchesChartProfile } from "./charts.ts";
+import { readDasha } from "./dasha.ts";
 import { getProvenanceStatus } from "../kundali/chart-helpers.ts";
 import { SAMPLE_NORTH_LONDON_PROFILE } from "../kundali/sample-north-london.ts";
 
@@ -32,6 +33,40 @@ const envelope = {
 };
 
 describe("Chart calculation API", () => {
+  it("captures only a canonical snapshot resource and keeps the calculation body unchanged", async () => {
+    const snapshot = "112e20d1-fb30-4907-a286-e06c68fcb26a";
+    for (const [location, intended] of [
+      [`/api/v1/charts/${snapshot}`, snapshot],
+      [`https://untrusted.invalid/api/v1/charts/${snapshot}`, null],
+      ["/api/v1/charts/invalid", null],
+      [null, null],
+    ]) {
+      let received;
+      const result = await calculateChart({
+        getAccessToken: () => "sample-token",
+        fetchImpl: async () => Response.json(envelope, { headers: location ? { Location: location } : {} }),
+      }, profile, settings, undefined, (id) => { received = id; });
+      assert.deepEqual(result, envelope);
+      assert.equal(received, intended);
+    }
+  });
+
+  it("queries Dasha for the snapshot UUID and preserves microseconds and offsets", async () => {
+    const instant = "2026-01-01T00:00:00.123456+05:45";
+    const snapshot = "112e20d1-fb30-4907-a286-e06c68fcb26a";
+    const signal = new AbortController().signal;
+    const response = await readDasha({
+      getAccessToken: () => "sample-token",
+      fetchImpl: async (url, init) => {
+        assert.equal(init.signal, signal);
+        assert.equal(new URL(url).pathname, `/api/v1/charts/${snapshot}/dasha`);
+        assert.equal(new URL(url).searchParams.get("as_of"), instant);
+        return Response.json({ birth_utc: "2015-04-25T13:01:09.012345+00:00" });
+      },
+    }, snapshot, instant, signal);
+    assert.equal(response.birth_utc, "2015-04-25T13:01:09.012345+00:00");
+  });
+
   it("POSTs supported defaults only and preserves the response envelope", async () => {
     const result = await calculateChart({
       getAccessToken: () => "sample-token",

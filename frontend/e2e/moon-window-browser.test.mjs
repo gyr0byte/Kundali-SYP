@@ -57,6 +57,7 @@ for (const [locale, language, width, height] of [["en", "EN", 1440, 900], ["ne",
       await page.getByRole("button", {name: labels.moonWindow.calculate, exact: true}).click();
       await panel.getByText(labels.moonWindow.stable, {exact: true}).waitFor();
       await panel.getByText(labels.moonWindow.uncertain, {exact: true}).first().waitFor();
+      await page.getByRole("region", {name: labels.dasha.title}).getByText(labels.dasha.unknown).waitFor();
       assert.match(await panel.textContent(), locale === "ne" ? /मेष/ : /Aries/);
       assert.equal(await page.getByRole("region", { name: labels.chartSectionTitle }).count(), 0);
       assert.equal(await page.getByRole("region", { name: labels.tableSectionTitle }).count(), 0);

@@ -393,11 +393,81 @@ Nakshatra mappings, all nine opening lords, all three year conventions,
 and the public natal-chart regressions. Ruff lint and formatting, mypy,
 and whitespace checks passed.
 
-API access, persistence, Dasha fact integration and frontend visualization
-remain pending. A future
-integration should derive the timeline from an owner-authorized natal
-snapshot with its recorded time certainty and resolved settings, and keep
-it separate from the astronomical Chart Facts.
+#### Dasha API and derived facts
+
+`GET /api/v1/charts/{snapshot_id}/dasha` derives a schedule from the
+encrypted version 1 natal snapshot. The existing snapshot reader checks
+profile ownership before decryption. A missing or inaccessible snapshot
+returns 404. A version 2 Moon-only snapshot returns HTTP 409 with
+`DASHA_UNKNOWN_BIRTH_TIME`. The endpoint responds with
+`Cache-Control: no-store`. The response identifies the original snapshot,
+chart fingerprint, profile revision and whether that revision is current
+at the time of the read. Historical snapshots retain their stored
+certainty and calculation settings until the parent profile is deleted.
+
+Optional `as_of` takes an ISO 8601 timestamp with an explicit UTC offset
+and up to six fractional digits. Omission yields `not_requested`. A
+prebirth instant yields `before_birth` even inside the opening Mahadasha.
+At or beyond the cycle's exclusive end the result is `outside_cycle`.
+Active periods are returned only for instants from birth through the
+exclusive cycle end. Full original period boundaries are returned for
+inspection in every successful response. JSON timestamps use UTC with
+six fractional digits and a `+00:00` offset. Balances use reduced integer
+numerator/denominator pairs.
+
+The separate `facts` array contains a typed `initial_balance` and, when the
+lookup is active, three typed `active_period` facts. Each carries its
+snapshot scope, timeline identity, method version and birth-time certainty.
+Active facts identify the exact evaluation instant and period. Fact IDs
+include the snapshot and method scope. Active fact IDs include the UTC
+evaluation instant. These facts are derived on demand, separate from
+the immutable natal fact allowlist and the Moon-only response. They are
+available for future grounding. There are no Dasha rows, migrations,
+changes to encrypted snapshot content, or additional ephemeris calls.
+
+An offline benchmark on the Windows development machine used 30 measured
+iterations per supported year convention after five warmups. Across the
+three medians, the engine took 7.54–8.00 ms. Engine plus response model
+construction took 18.74–19.69 ms, followed by 5.56–5.67 ms for JSON
+serialization. The full 819-period response with active facts was
+168,714–168,719 bytes before compression. The benchmark excludes database,
+decryption, HTTP and concurrent-request costs. Date lookups currently
+return the full timeline with the updated active periods.
+
+The workspace binds this timeline to the UUID in the chart calculation's
+CORS-exposed `Location` header. The date field evaluates midnight UTC
+on the selected Gregorian date. The current-time button sends an explicit
+instant. The browser displays server timestamps and active periods without
+performing boundary comparisons. Profile revisions and calculation setting
+changes clear the previous timeline. A year-length-only change preserves
+the displayed chart's original settings and requires recalculation before
+Dasha can use the new year length.
+
+Offline verification covered snapshot ownership, the Moon-only
+eligibility error, historical revisions, deletion, deterministic facts,
+all three year conventions, and lookups one microsecond before and
+exactly at a transition. Mocked Chromium checks covered English desktop
+and Nepali mobile, including retry, date selection, period drill-down,
+stale responses, year-length changes and profile edits. The existing
+chart API test verifies that CORS exposes the `Location` header.
+
+Offline verification passed 108 backend tests, 17 frontend tests and
+four mocked Chromium checks. Ruff, mypy, ESLint, TypeScript, the
+production build and whitespace checks passed.
+
+Live verification used the restricted development PostgreSQL role with
+English Chromium at 1440 × 900 and Nepali Chromium at 375 × 812. It
+confirmed browser access to the snapshot URL, all three year conventions,
+microsecond transition boundaries, historical and conditional results,
+the Moon-only 409 response, and cross-user 404s. There were no unexpected
+console errors, request failures or page-level horizontal overflow.
+Seven sequential responses measured 454–528 ms (482 ms median) and
+166,338–168,741 bytes. Concurrent performance remains unmeasured.
+
+Historical snapshots are available by UUID. The workspace has no history
+picker. Both synthetic profiles were deleted and all five associated
+Dasha URLs returned 404. Two synthetic development accounts and their
+audit history remain. Audit rows were not independently queried.
 
 ### Supported calculation dates
 

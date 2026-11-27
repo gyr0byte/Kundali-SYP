@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Response, status
+from fastapi import APIRouter, Body, Depends, Query, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -13,8 +15,10 @@ from app.api.schemas.chart import (
     CalculationResponse,
     ChartCalculationRequest,
     ChartConflictErrorResponse,
+    ChartSnapshotResponse,
     SnapshotResponse,
 )
+from app.api.schemas.dasha import DashaEligibilityError, DashaQuery, DashaResponse
 from app.core.config import Settings
 from app.core.dependencies import get_db, get_owned_or_404, get_settings
 from app.core.permissions import Permission, require_permission
@@ -27,6 +31,7 @@ from app.services.chart_service import (
     get_chart_snapshot,
     persist_chart_snapshot,
 )
+from app.services.dasha_service import derive_snapshot_dasha
 from app.services.profile_service import ProfileStorageError
 
 router = APIRouter(tags=["charts"])
@@ -122,6 +127,48 @@ def compute_profile_chart_endpoint(
     response.headers["Cache-Control"] = "no-store"
     response.headers["Location"] = f"/api/v1/charts/{snapshot_id}"
     return result
+
+
+@router.get(
+    "/charts/{snapshot_id}/dasha",
+    response_model=DashaResponse,
+    responses={409: {"model": DashaEligibilityError}},
+)
+def read_chart_dasha(
+    snapshot_id: uuid.UUID,
+    query: Annotated[DashaQuery, Query()],
+    current_user: User = Depends(require_permission(Permission.CHART_READ_OWN)),
+    db: Session = Depends(get_db),
+    app_settings: Settings = Depends(get_settings),
+) -> DashaResponse | Response:
+    """Derive a schedule from an owned snapshot without recalculating planetary positions."""
+    try:
+        snapshot = get_chart_snapshot(
+            db,
+            snapshot_id,
+            owner_id=current_user.id,
+            app_settings=app_settings,
+        )
+        db.rollback()
+        if snapshot is None:
+            return JSONResponse(status_code=404, content={"detail": "Item not found"})
+        if not isinstance(snapshot, ChartSnapshotResponse):
+            return JSONResponse(
+                status_code=409,
+                content=DashaEligibilityError(
+                    code="DASHA_UNKNOWN_BIRTH_TIME",
+                    detail="Vimshottari Dasha requires an exact or approximate birth time",
+                ).model_dump(),
+            )
+        try:
+            as_of = datetime.fromisoformat(query.as_of).astimezone(UTC) if query.as_of else None
+        except (ValueError, OverflowError):
+            return JSONResponse(status_code=422, content={"detail": "Invalid evaluation instant"})
+        return derive_snapshot_dasha(snapshot, as_of)
+    except Exception:
+        db.rollback()
+        logger.error("Chart Dasha derivation failed")
+        return JSONResponse(status_code=500, content={"detail": "Unable to derive Dasha schedule"})
 
 
 @router.get("/charts/{snapshot_id}", response_model=SnapshotResponse)

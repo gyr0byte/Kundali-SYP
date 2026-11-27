@@ -72,6 +72,114 @@ def _create_profile(
     return dict(resp.json())
 
 
+@pytest.mark.parametrize("year_days", [360, 365.2425, 365.25])
+def test_dasha_uses_saved_settings_and_exact_transition(
+    client: TestClient, user_factory: Any, monkeypatch: pytest.MonkeyPatch, year_days: float
+) -> None:
+    user_factory(email="dasha@example.com")
+    headers = _auth_headers(client, "dasha@example.com")
+    profile = _create_profile(client, headers, time_certainty="approximate")
+    calculated = client.post(
+        f"/api/v1/profiles/{profile['id']}/chart",
+        json={"year_days": year_days},
+        headers=headers,
+    )
+    assert calculated.status_code == 200
+    path = calculated.headers["location"] + "/dasha"
+
+    def unexpected_calculation(*args: object, **kwargs: object) -> None:
+        pytest.fail("Dasha must reuse the stored natal chart")
+
+    monkeypatch.setattr("app.services.chart_service.compute_chart_facts", unexpected_calculation)
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    data = response.json()
+    assert data["snapshot_id"] == path.split("/")[-2]
+    assert data["chart_id"] == calculated.json()["chart"]["chart_id"]
+    assert data["year_days"] == year_days
+    assert data["is_current_profile_revision"]
+    assert data["is_conditional"] and data["time_certainty"] == "approximate"
+    assert data["lookup"] == {"as_of": None, "status": "not_requested", "periods": None}
+    assert data["facts"][0]["balance"] == data["initial_balance"]
+    first, second, *_ = data["mahadashas"]
+    transition = first["end_utc_exclusive"]
+    assert transition == second["start_utc"]
+    moment = datetime.fromisoformat(transition)
+    before = client.get(
+        path, params={"as_of": (moment - timedelta(microseconds=1)).isoformat()}, headers=headers
+    ).json()
+    assert before["lookup"]["periods"]["mahadasha"]["period_id"] == first["period_id"]
+    at = client.get(path, params={"as_of": transition}, headers=headers)
+    assert at.status_code == 200
+    assert at.content == client.get(path, params={"as_of": transition}, headers=headers).content
+    active = at.json()
+    assert active["lookup"]["periods"]["mahadasha"]["period_id"] == second["period_id"]
+    assert active["lookup"]["periods"]["pratyantardasha"]["start_utc"] == transition
+    assert len(active["facts"]) == 4
+    for fact in active["facts"][1:]:
+        assert fact["evaluated_at"] == transition
+        assert fact["method"] == "vimshottari-v1"
+        assert fact["snapshot_id"] == data["snapshot_id"]
+    assert len({fact["fact_id"] for fact in active["facts"]}) == 4
+    assert active["facts"][1]["fact_id"] != before["facts"][1]["fact_id"]
+    for instant, expected in [
+        (data["start_utc"], "before_birth"),
+        (data["end_utc_exclusive"], "outside_cycle"),
+    ]:
+        lookup = client.get(path, params={"as_of": instant}, headers=headers).json()
+        assert lookup["lookup"]["status"] == expected
+        assert lookup["lookup"]["periods"] is None and len(lookup["facts"]) == 1
+
+
+def test_dasha_snapshot_authorization_revision_and_unknown_time(
+    client: TestClient, user_factory: Any
+) -> None:
+    user_factory(email="dasha-owner@example.com")
+    user_factory(email="dasha-other@example.com", role=UserRole.ADMIN)
+    owner = _auth_headers(client, "dasha-owner@example.com")
+    other = _auth_headers(client, "dasha-other@example.com")
+    profile = _create_profile(client, owner, time_certainty="approximate")
+    profile_path = f"/api/v1/profiles/{profile['id']}"
+    calculated = client.post(profile_path + "/chart", headers=owner)
+    path = calculated.headers["location"] + "/dasha"
+    initial = client.get(path, headers=owner).json()
+    denied = client.get(path, headers=other)
+    missing = client.get(f"/api/v1/charts/{uuid.uuid4()}/dasha", headers=owner)
+    assert denied.status_code == missing.status_code == 404
+    assert denied.json() == missing.json()
+    unauthenticated = client.get(path)
+    assert unauthenticated.status_code == 401
+    assert unauthenticated.headers["cache-control"] == "no-store"
+    for params in (
+        {"as_of": "2026-01-01"},
+        {"as_of": "2026-01-01T00:00:00.0000001Z"},
+        {"as_of": "2026-02-31T00:00:00Z"},
+        {"moon_longitude": "10"},
+    ):
+        invalid = client.get(path, params=params, headers=owner)
+        assert invalid.status_code == 422
+        assert invalid.headers["cache-control"] == "no-store"
+    assert (
+        client.patch(
+            profile_path,
+            json={"time_certainty": "unknown", "time_local": None},
+            headers=owner,
+        ).status_code
+        == 200
+    )
+    historic = client.get(path, headers=owner).json()
+    assert historic == (initial | {"is_current_profile_revision": False})
+    lunar = client.post(profile_path + "/chart", headers=owner)
+    assert lunar.status_code == 200 and "moon" in lunar.json()
+    blocked = client.get(lunar.headers["location"] + "/dasha", headers=owner)
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "DASHA_UNKNOWN_BIRTH_TIME"
+    assert blocked.headers["cache-control"] == "no-store"
+    assert client.delete(profile_path, headers=owner).status_code == 204
+    assert client.get(path, headers=owner).status_code == 404
+
+
 def test_chart_endpoint_success_determinism_settings_and_idempotent_persistence(
     client: TestClient,
     db_session: Session,

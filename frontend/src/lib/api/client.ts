@@ -218,6 +218,7 @@ export async function apiRequest<T>(
     body?: unknown;
     config?: ApiClientConfig;
     signal?: AbortSignal;
+    onHeaders?: (headers: Headers) => void;
   } = {}
 ): Promise<T> {
   const { method = "GET", body, config = {}, signal } = options;
@@ -259,5 +260,6 @@ export async function apiRequest<T>(
     throw buildApiErrorFromResponse(result.response.status, result.parsedBody);
   }
 
+  options.onHeaders?.(result.response.headers);
   return result.parsedBody as T;
 }
