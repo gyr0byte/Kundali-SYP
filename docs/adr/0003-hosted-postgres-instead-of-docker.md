@@ -10,7 +10,8 @@ The project architecture requires PostgreSQL with the `pgvector` extension for s
 Use a hosted PostgreSQL service (such as Neon or Supabase) that provides `pgvector` natively. No local Docker daemon is required or permitted.
 
 ## Consequences
-* All database connections require TLS/SSL encryption (`sslmode=require`).
-* No database instance runs locally; development and testing do not require a live database connection unless explicitly executing database-specific tests.
-* The test suite and calculation engine remain fully operational and testable using local JSON fixtures without database connectivity.
-* Currently, database models and migration files remain stubs; no live database connections are initiated during standard development or testing.
+* Hosted PostgreSQL requires certificate and hostname verification (`sslmode=verify-full`). The Windows workflow uses an explicit trusted PEM CA bundle on D: and a direct DNS endpoint.
+* Managed PostgreSQL remains preferred. Native PostgreSQL is an alternative when it meets the same integration requirements. Applications run natively on Windows.
+* Standard tests remain offline. Live PostgreSQL tests require an explicit opt-in and a separately identified disposable database.
+* Alembic tracks pgvector enablement. The extension is intentionally retained on downgrade.
+* The [database setup runbook](../architecture/DATABASE_SETUP.md) defines private configuration, target checks and live verification.

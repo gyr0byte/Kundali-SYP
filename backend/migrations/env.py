@@ -8,7 +8,8 @@ from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
 
 # Ensure `backend/` is importable regardless of current working directory.
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -16,6 +17,7 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from app.db.base import Base  # noqa: E402
+from app.db.connection import postgres_engine, postgres_url  # noqa: E402
 from app.db.models import (  # noqa: E402, F401
     AstrologerProfile,
     AuditLog,
@@ -32,29 +34,11 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-_PLACEHOLDER_URL = "driver://user:pass@localhost/dbname"
-
-
-def _resolve_database_url(*, offline: bool) -> str:
-    """Resolve database URL safely without exposing settings errors in offline mode."""
-    configured = config.get_main_option("sqlalchemy.url")
-    env_url = os.environ.get("DATABASE_URL")
-
-    if configured and configured != _PLACEHOLDER_URL:
-        return configured
-    if env_url and env_url.strip():
-        return env_url.strip()
-    if offline:
-        # Dialect-only placeholder URL for `--sql` generation (opens no DB connection).
-        return "postgresql+psycopg://"
-    raise RuntimeError("DATABASE_URL must be set to run online Alembic migrations.")
-
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode to emit SQL without a DB connection."""
-    url = _resolve_database_url(offline=True)
     context.configure(
-        url=url,
+        dialect_name="postgresql",
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -66,26 +50,39 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def run_migrations_online() -> None:
-    """Run migrations in 'online' mode using a configured SQLAlchemy engine."""
-    url = _resolve_database_url(offline=False)
-    section = config.get_section(config.config_ini_section, {})
-    section["sqlalchemy.url"] = url
-    connectable = engine_from_config(
-        section,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
+def migrate(connection: Connection) -> None:
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        compare_server_default=True,
     )
+    with context.begin_transaction():
+        context.run_migrations()
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-        )
 
-        with context.begin_transaction():
-            context.run_migrations()
+def run_migrations_online() -> None:
+    """Use a guarded test connection or the operator's independently selected target."""
+    if connection := config.attributes.get("connection"):
+        migrate(connection)
+        return
+
+    url = postgres_url(os.environ.get("DATABASE_URL", ""), os.environ.get("KUNDALI_DB_CA_FILE"))
+    expected = os.environ.get("KUNDALI_DB_MIGRATION_TARGET")
+    if not expected or expected != f"{url.host}:{url.port}/{url.database}":
+        raise RuntimeError("Online migration target does not match the approved target.")
+    engine = postgres_engine(url)
+    try:
+        with engine.begin() as connection:
+            if connection.scalar(text("SELECT current_schema() = 'public'")) is not True:
+                raise RuntimeError("Expected the public migration schema.")
+            migrate(connection)
+    except Exception:
+        raise RuntimeError(
+            "Online migration failed. Inspect the approved database privately."
+        ) from None
+    finally:
+        engine.dispose()
 
 
 if context.is_offline_mode():

@@ -1,7 +1,4 @@
-"""Database session factory.
-
-# NOTE: All PostgreSQL production connections must use SSL (sslmode=require).
-"""
+"""Database session factory."""
 
 from collections.abc import Generator
 from typing import Any
@@ -12,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import get_settings
+from app.db.connection import database_url, postgres_engine, postgres_url
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
@@ -30,14 +28,13 @@ def get_engine() -> Engine:
     if _engine is None:
         settings = get_settings()
         url = settings.DATABASE_URL
-        connect_args: dict[str, Any] = {}
-        if url.startswith("sqlite"):
-            connect_args["check_same_thread"] = False
-            _engine = create_engine(url, connect_args=connect_args, poolclass=StaticPool)
+        if database_url(url).get_backend_name() == "sqlite":
+            _engine = create_engine(
+                url, connect_args={"check_same_thread": False}, poolclass=StaticPool
+            )
             event.listen(_engine, "connect", _enable_sqlite_foreign_keys)
         else:
-            # Production PostgreSQL must require SSL
-            _engine = create_engine(url, pool_pre_ping=True)
+            _engine = postgres_engine(postgres_url(url, settings.KUNDALI_DB_CA_FILE), pooled=True)
     return _engine
 
 

@@ -37,9 +37,15 @@ class User(Base):
         default=UserRole.USER,
         nullable=False,
     )
-    language: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    language: Mapped[str] = mapped_column(
+        String(10), default="en", server_default="en", nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=sa.true(), nullable=False
+    )
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

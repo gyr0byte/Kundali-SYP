@@ -96,7 +96,7 @@ def test_birth_profile_encrypted_columns_and_schema_shape(db_session: Session) -
         "updated_at",
     }
     assert set(BirthProfile.__table__.columns.keys()) == expected_columns
-    index_names = {idx.name for idx in BirthProfile.__table__.indexes}
+    index_names = {idx.name for idx in Base.metadata.tables["birth_profiles"].indexes}
     assert "ix_birth_profiles_owner_id" in index_names
 
     raw_row = db_session.execute(
@@ -290,7 +290,7 @@ def test_user_birth_profiles_orm_and_db_on_delete_cascade(db_session: Session) -
     assert db_session.get(BirthProfile, p_keep_id) is not None
 
 
-def test_alembic_discovery_and_offline_sql_generation() -> None:
+def test_alembic_discovery_and_offline_sql_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Alembic env discovers all tables cleanly and generates offline upgrade/downgrade SQL."""
     assert {
         "users",
@@ -307,7 +307,8 @@ def test_alembic_discovery_and_offline_sql_generation() -> None:
 
     script_dir = ScriptDirectory.from_config(cfg)
     heads = script_dir.get_heads()
-    assert heads == ["0002_birth_profiles_table"]
+    assert heads == ["0003_enable_pgvector"]
+    assert script_dir.get_revision(heads[0]).down_revision == "0002_birth_profiles_table"
     rev_0002 = script_dir.get_revision("0002_birth_profiles_table")
     assert rev_0002 is not None
     assert rev_0002.down_revision == "0001_initial_auth_tables"
@@ -315,6 +316,7 @@ def test_alembic_discovery_and_offline_sql_generation() -> None:
     upgrade_buf = io.StringIO()
     cfg_up = Config(str(alembic_ini), stdout=upgrade_buf)
     cfg_up.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
+    monkeypatch.setenv("DATABASE_URL", "intentionally-invalid-offline-test-value")
     command.upgrade(cfg_up, "head", sql=True)
     upgrade_sql = upgrade_buf.getvalue()
     assert "CREATE TABLE birth_profiles" in upgrade_sql
@@ -322,14 +324,16 @@ def test_alembic_discovery_and_offline_sql_generation() -> None:
     assert "ON DELETE CASCADE" in upgrade_sql
     assert "check_birth_profile_time_local_certainty" in upgrade_sql
     assert "check_birth_profile_calendar_date_ad" in upgrade_sql
+    assert "CREATE EXTENSION IF NOT EXISTS vector" in upgrade_sql
 
     downgrade_buf = io.StringIO()
     cfg_down = Config(str(alembic_ini), stdout=downgrade_buf)
     cfg_down.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
-    command.downgrade(cfg_down, "0002_birth_profiles_table:0001_initial_auth_tables", sql=True)
+    command.downgrade(cfg_down, "0003_enable_pgvector:0001_initial_auth_tables", sql=True)
     downgrade_sql = downgrade_buf.getvalue()
     assert "DROP INDEX" in downgrade_sql
     assert "DROP TABLE birth_profiles" in downgrade_sql
+    assert "DROP EXTENSION" not in downgrade_sql
 
 
 def test_profile_audit_allowlist_and_nested_pii_rejection(db_session: Session) -> None:

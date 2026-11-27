@@ -1,6 +1,6 @@
 """Application configuration settings via pydantic-settings."""
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.security import validate_fernet_key
@@ -17,12 +17,13 @@ class Settings(BaseSettings):
     )
 
     ENVIRONMENT: str = "prod"
-    JWT_SECRET: str
-    DATABASE_URL: str
+    JWT_SECRET: str = Field(repr=False, exclude=True)
+    DATABASE_URL: str = Field(repr=False, exclude=True)
+    KUNDALI_DB_CA_FILE: str | None = None
     # Required 32-byte URL-safe base64 Fernet key for at-rest profile encryption.
     # IMPORTANT: Must remain stable and securely backed up; losing or changing it
     # without a controlled migration renders encrypted profile data unrecoverable.
-    ENCRYPTION_KEY: str
+    ENCRYPTION_KEY: str = Field(repr=False, exclude=True)
 
     CORS_ALLOWED_ORIGINS: list[str] = []
 
