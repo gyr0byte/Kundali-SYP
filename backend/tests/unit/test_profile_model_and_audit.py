@@ -81,6 +81,7 @@ def test_birth_profile_encrypted_columns_and_schema_shape(db_session: Session) -
 
     expected_columns = {
         "id",
+        "revision",
         "owner_id",
         "label_enc",
         "input_calendar",
@@ -307,8 +308,11 @@ def test_alembic_discovery_and_offline_sql_generation(monkeypatch: pytest.Monkey
 
     script_dir = ScriptDirectory.from_config(cfg)
     heads = script_dir.get_heads()
-    assert heads == ["0003_enable_pgvector"]
-    assert script_dir.get_revision(heads[0]).down_revision == "0002_birth_profiles_table"
+    assert heads == ["0004_chart_snapshots"]
+    assert script_dir.get_revision(heads[0]).down_revision == "0003_enable_pgvector"
+    assert (
+        script_dir.get_revision("0003_enable_pgvector").down_revision == "0002_birth_profiles_table"
+    )
     rev_0002 = script_dir.get_revision("0002_birth_profiles_table")
     assert rev_0002 is not None
     assert rev_0002.down_revision == "0001_initial_auth_tables"
@@ -325,14 +329,18 @@ def test_alembic_discovery_and_offline_sql_generation(monkeypatch: pytest.Monkey
     assert "check_birth_profile_time_local_certainty" in upgrade_sql
     assert "check_birth_profile_calendar_date_ad" in upgrade_sql
     assert "CREATE EXTENSION IF NOT EXISTS vector" in upgrade_sql
+    assert "ALTER TABLE birth_profiles ADD COLUMN revision" in upgrade_sql
+    assert "CREATE TABLE chart_snapshots" in upgrade_sql
+    assert "CONSTRAINT uq_chart_snapshots_result UNIQUE" in upgrade_sql
 
     downgrade_buf = io.StringIO()
     cfg_down = Config(str(alembic_ini), stdout=downgrade_buf)
     cfg_down.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
-    command.downgrade(cfg_down, "0003_enable_pgvector:0001_initial_auth_tables", sql=True)
+    command.downgrade(cfg_down, "0004_chart_snapshots:0001_initial_auth_tables", sql=True)
     downgrade_sql = downgrade_buf.getvalue()
     assert "DROP INDEX" in downgrade_sql
     assert "DROP TABLE birth_profiles" in downgrade_sql
+    assert "DROP TABLE chart_snapshots" in downgrade_sql
     assert "DROP EXTENSION" not in downgrade_sql
 
 

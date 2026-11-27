@@ -337,6 +337,7 @@ def update_profile(
     except ValueError:
         raise ProfileStorageError("Unable to protect birth profile data") from None
 
+    profile.revision += 1
     profile.updated_at = clock.now()
     db.flush()
 

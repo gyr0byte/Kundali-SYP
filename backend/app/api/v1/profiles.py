@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.schemas.profile import (
@@ -43,6 +44,18 @@ router = APIRouter(
 def _client_ip(request: Request) -> str | None:
     """Extract client IP safely without inspecting payloads."""
     return request.client.host if request.client else None
+
+
+def _lock_owned_profile(db: Session, profile_id: uuid.UUID, owner_id: uuid.UUID) -> BirthProfile:
+    profile = db.scalar(
+        select(BirthProfile)
+        .where(BirthProfile.id == profile_id, BirthProfile.owner_id == owner_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    )
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    return profile
 
 
 @router.post(
@@ -129,7 +142,7 @@ def patch_birth_profile(
     settings: Settings = Depends(get_settings),
 ) -> BirthProfileResponse | Response:
     """Partially update an owned birth profile after merged-state validation."""
-    profile = get_owned_or_404(BirthProfile, profile_id, current_user.id, db)
+    profile = _lock_owned_profile(db, profile_id, current_user.id)
     try:
         return update_profile(
             db,
@@ -168,6 +181,6 @@ def delete_birth_profile(
     db: Session = Depends(get_db),
 ) -> Response:
     """Hard-delete an owned birth profile (404 if missing or owned by another user)."""
-    profile = get_owned_or_404(BirthProfile, profile_id, current_user.id, db)
+    profile = _lock_owned_profile(db, profile_id, current_user.id)
     delete_profile(db, profile=profile, owner_id=current_user.id, ip=_client_ip(request))
     return Response(status_code=status.HTTP_204_NO_CONTENT)

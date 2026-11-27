@@ -18,8 +18,11 @@ from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import URL, Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.schemas.profile import BirthProfileCreate, BirthProfileUpdate
+from app.calc.facts import ChartSettings
 from app.core.clock import FrozenClock
 from app.core.config import Settings
 from app.core.mailer import ConsoleMailer
@@ -27,11 +30,28 @@ from app.core.permissions import UserRole
 from app.core.security import hash_token
 from app.db.base import Base
 from app.db.connection import DatabaseConfigurationError, postgres_engine, postgres_url
-from app.db.models import AstrologerProfile, AstrologerStatus, AuditLog, RefreshToken, User
+from app.db.models import (
+    AstrologerProfile,
+    AstrologerStatus,
+    AuditLog,
+    BirthProfile,
+    ChartSnapshot,
+    InputCalendar,
+    RefreshToken,
+    TimeCertainty,
+    User,
+)
 from app.services import auth_service, user_service
 from app.services.account_locks import lock_administration, lock_user
 from app.services.astrologer_service import approve_astrologer
 from app.services.audit_service import log_action
+from app.services.chart_service import (
+    ChartProfileConflictError,
+    calculate_profile_chart,
+    get_chart_snapshot,
+    persist_chart_snapshot,
+)
+from app.services.profile_service import create_profile, delete_profile, update_profile
 
 BACKEND = Path(__file__).resolve().parents[2]
 
@@ -125,7 +145,7 @@ def test_migrations_match_models_and_install_vector(migrated_engine: Engine) -> 
     with migrated_engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM public.alembic_version"))
-            == "0003_enable_pgvector"
+            == "0004_chart_snapshots"
         )
         assert connection.scalar(
             text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")
@@ -227,6 +247,109 @@ def _run_blocked_race[T](
             result = first(db)
         pending.result(timeout=25)
     return result
+
+
+@pytest.mark.parametrize("operation", ["duplicate", "edit", "delete"])
+def test_postgres_snapshot_write_serializes_with_profile_mutation(
+    migrated_engine: Engine,
+    db_session: Session,
+    test_clock: FrozenClock,
+    test_settings: Settings,
+    user_factory: Any,
+    operation: str,
+) -> None:
+    owner_id = user_factory(email=f"snapshot-{operation}@example.com").id
+    created = create_profile(
+        db_session,
+        owner_id=owner_id,
+        payload=BirthProfileCreate(
+            label="Snapshot test",
+            input_calendar=InputCalendar.AD,
+            entered_date="2000-01-01",
+            time_certainty=TimeCertainty.EXACT,
+            time_local="12:00",
+            place_name="Synthetic place",
+            latitude=27.7,
+            longitude=85.3,
+            timezone="Asia/Kathmandu",
+        ),
+        clock=test_clock,
+        settings=test_settings,
+    )
+    profile_id = created.id
+    profile = db_session.get(BirthProfile, profile_id)
+    assert profile is not None
+    revision = profile.revision
+    db_session.expunge(profile)
+    db_session.rollback()
+    result = calculate_profile_chart(
+        profile, owner_id=owner_id, calc_settings=ChartSettings(), app_settings=test_settings
+    )
+    duplicates: list[uuid.UUID] = []
+
+    def hold_profile(db: Session) -> None:
+        db.execute(select(BirthProfile.id).where(BirthProfile.id == profile_id).with_for_update())
+
+    def persist(db: Session) -> uuid.UUID:
+        return persist_chart_snapshot(
+            db, result, profile_revision=revision, owner_id=owner_id, app_settings=test_settings
+        )
+
+    def first(db: Session) -> uuid.UUID | None:
+        if operation == "duplicate":
+            return persist(db)
+        target = db.get(BirthProfile, profile_id)
+        assert target is not None
+        if operation == "edit":
+            update_profile(
+                db,
+                profile=target,
+                owner_id=owner_id,
+                payload=BirthProfileUpdate(label="Edited"),
+                clock=test_clock,
+                settings=test_settings,
+            )
+        else:
+            delete_profile(db, profile=target, owner_id=owner_id)
+        return None
+
+    def second(db: Session) -> None:
+        if operation == "duplicate":
+            duplicates.append(persist(db))
+        else:
+            with pytest.raises(ChartProfileConflictError) as error:
+                persist(db)
+            assert error.value.code == "PROFILE_CHANGED"
+
+    snapshot_id = _run_blocked_race(migrated_engine, hold_profile, first, second)
+    with Session(migrated_engine) as db:
+        rows = db.scalars(select(ChartSnapshot).where(ChartSnapshot.profile_id == profile_id)).all()
+        if operation != "duplicate":
+            assert rows == []
+            return
+        assert snapshot_id is not None and duplicates == [snapshot_id]
+        assert len(rows) == 1
+        saved = get_chart_snapshot(db, snapshot_id, owner_id=owner_id, app_settings=test_settings)
+        assert saved is not None and saved.chart == result.chart
+        row = rows[0]
+        db.add(
+            ChartSnapshot(
+                id=uuid.uuid4(),
+                profile_id=profile_id,
+                profile_revision=revision,
+                schema_version=row.schema_version,
+                fingerprint_key=row.fingerprint_key,
+                payload_enc=row.payload_enc,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db.flush()
+        db.rollback()
+
+        target = db.get(BirthProfile, profile_id)
+        assert target is not None
+        delete_profile(db, profile=target, owner_id=owner_id)
+        assert db.get(ChartSnapshot, snapshot_id) is None
 
 
 def test_concurrent_refresh_has_one_successor_and_replay_revokes_its_family(

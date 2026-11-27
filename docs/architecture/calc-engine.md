@@ -92,6 +92,14 @@ Callers should treat IDs as opaque strings. The CLI and fixtures can still suppl
 explicit IDs. Ephemeris file versions or byte content are not independently
 fingerprinted when the reported native source and canonical result agree.
 
+### Persistent chart snapshots
+
+`POST /api/v1/profiles/{profile_id}/chart` retains its calculation response body and returns an owner-scoped snapshot URL in `Location`. `GET /api/v1/charts/{snapshot_id}` reads the stored result by its opaque UUID, returns the typed `chart.facts` with their units, and marks whether the source profile revision is still current at read time. Responses use `Cache-Control: no-store`. Other owners receive `404` even if their own chart has the same deterministic fingerprint.
+
+Each stored v1 document contains the original engine fingerprint, resolved settings, engine version, aggregate ephemeris provenance, and typed facts in engine order. Angles are in degrees and planetary speed is in degrees per day. The authenticated Fernet document includes its snapshot and profile identities. Keeping the versioned facts inline protects the whole result without duplicating raw profile fields or exposing per-fact metadata in plaintext. A keyed lookup digest includes the profile ID, so the storage index does not reveal equal fingerprints across profiles. The snapshot UUID, profile reference/revision, schema version, creation time and digest remain available to the database. Recovering or rotating the Fernet key must account for both ciphertext and its keyed lookup digest.
+
+Repeated results reuse the same row within a profile revision and snapshot schema version. The preparation read transaction ends before native calculation. A short PostgreSQL parent-row lock serializes snapshot insertion with profile edits and deletions, and the uniqueness constraint is the final duplicate guard. Every successful profile PATCH advances the revision, including metadata-only edits. A stale calculation returns `409 PROFILE_CHANGED` and writes nothing. Historical snapshots remain until the parent profile is deleted, which cascades to snapshots and their embedded facts. Snapshot history is accessible by UUID only, with no listing UI. Several snapshots can match the current profile revision, including results from earlier engine versions or different settings. Direct SQL edits to birth data must preserve the revision contract. AI interpretation, Dasha calculations and knowledge retrieval remain unimplemented.
+
 ### Supported calculation dates
 
 Profile calculation uses the normalized Gregorian instant. It accepts dates where

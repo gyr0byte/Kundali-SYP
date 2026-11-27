@@ -70,6 +70,20 @@ To apply migrations, run the Alembic command above from `backend` without `--sql
 
 The migrator needs `USAGE` and `CREATE` on the target schema and ownership, directly or through an approved owner role, of objects that it alters or drops. Database-wide CREATE and broader role memberships are unnecessary for ordinary table migrations. Check extension-specific grants separately when a future migration installs or updates an extension. Explicitly grant the runtime role the intended access to newly created objects from the owning role and verify the effective grants. Keep DDL with the migrator and preserve audit append-only and migration-history read-only access. Alembic currently emits a generic sanitized error on live failure. A future improvement is to report the operation stage and allowlisted SQLSTATE without exception text, query parameters, or connection details.
 
+### Chart snapshot migration and grants
+
+Revision `0004_chart_snapshots` adds a profile revision counter and the `chart_snapshots` table. Existing profiles start at revision `1`. The migrator needs ownership of `public.birth_profiles` and `CREATE` on the target schema. After the migration, the table owner grants the development runtime role the following privileges:
+
+```sql
+GRANT SELECT, INSERT ON TABLE public.chart_snapshots TO kundali_dev_app;
+```
+
+The existing `birth_profiles` grants cover revision reads, row locks and edits. The development runtime role was verified to have `SELECT` and `INSERT` on `chart_snapshots`, with `UPDATE`, `DELETE` and `TRUNCATE` denied. The foreign key cascades from profile deletion without a separate runtime grant on snapshots. Downgrading `0004` drops all stored snapshots and their facts.
+
+Development migration `0004` applied successfully, the database checker returned exit code 0, and backend startup passed using the existing DPAPI loader. All 48 focused offline tests and all 12 disposable PostgreSQL integration tests passed. The live suite took 88.41 seconds and exited 0, covering concurrent duplicate saves, profile edits and deletions. Ruff lint and formatting, mypy, offline Alembic SQL generation and whitespace checks passed.
+
+The live HTTP smoke test authenticated a synthetic account with the restricted runtime role and verified profile creation (`201`), chart calculation (`200`), the snapshot `Location` header, and snapshot retrieval (`200`). The stored result matched the calculated chart, including verified metadata and fact units. Recalculation reused the same snapshot. Cross-user access returned `404`, and parent deletion (`204`) made the snapshot return `404`. Full browser-to-database verification and portable Fernet recovery backup remain pending. Disposable test databases and synthetic development accounts remain in place.
+
 ## Disposable integration tests
 
 In a separate private PowerShell process, supply `KUNDALI_TEST_DATABASE_URL`, `KUNDALI_DB_CA_FILE`, and an independently confirmed `KUNDALI_TEST_DATABASE_TARGET` in `hostname:port/database` form. Use an empty database named `kundali_test_*` on a development-only endpoint, with credentials restricted to that test target. Leave normal development and production credentials out of the test shell. Set `KUNDALI_RUN_POSTGRES_TESTS=1` only after confirming that the target is disposable.

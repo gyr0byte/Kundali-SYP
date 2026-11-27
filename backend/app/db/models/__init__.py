@@ -2,6 +2,7 @@
 
 from app.db.models.astrologer_profile import AstrologerProfile, AstrologerStatus
 from app.db.models.audit_log import AuditLog
+from app.db.models.chart import ChartSnapshot
 from app.db.models.password_reset_token import PasswordResetToken
 from app.db.models.profile import BirthProfile, InputCalendar, TimeCertainty
 from app.db.models.refresh_token import RefreshToken
@@ -12,6 +13,7 @@ __all__ = [
     "AstrologerStatus",
     "AuditLog",
     "BirthProfile",
+    "ChartSnapshot",
     "InputCalendar",
     "PasswordResetToken",
     "RefreshToken",

@@ -56,6 +56,7 @@ class BirthProfile(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    revision: Mapped[int] = mapped_column(sa.Integer, server_default="1", nullable=False)
     owner_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         ForeignKey("users.id", ondelete="CASCADE"),

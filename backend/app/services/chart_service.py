@@ -3,19 +3,44 @@
 from __future__ import annotations
 
 import datetime
+import hmac
+import json
 import uuid
 from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
+from sqlalchemy import select
+from sqlalchemy.orm import Session, undefer
 
-from app.api.schemas.chart import ChartCalculationResponse, ChartConflictErrorCode
+from app.api.schemas.chart import (
+    ChartCalculationResponse,
+    ChartConflictErrorCode,
+    ChartFactUnits,
+    ChartSnapshotResponse,
+)
 from app.calc.ayanamsha import CalculationError
 from app.calc.ephemeris import EphemerisDateRangeError
 from app.calc.facts import ChartSettings, compute_chart_facts
 from app.calc.timeconv import TimeConversionError, TimeInput
 from app.core.config import Settings
+from app.core.security import decrypt_text, encrypt_text
+from app.db.models.chart import ChartSnapshot
 from app.db.models.profile import BirthProfile, InputCalendar, TimeCertainty
 from app.services.profile_service import ProfileCalcInputs, decrypt_profile_calc_inputs
+
+SNAPSHOT_SCHEMA_VERSION = 1
+
+
+class _StoredSnapshotV1(BaseModel):
+    """Versioned encrypted document, with immutable engine-order facts and their units."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    snapshot_id: uuid.UUID
+    profile_revision: int
+    fact_units: ChartFactUnits
+    result: ChartCalculationResponse
 
 
 class ChartProfileConflictError(RuntimeError):
@@ -195,4 +220,116 @@ def calculate_profile_chart(
         input_calendar=calc_inputs.input_calendar,
         time_certainty=calc_inputs.time_certainty,
         chart=chart,
+    )
+
+
+def _fingerprint_key(profile_id: uuid.UUID, chart_id: str, encryption_key: str) -> str:
+    """Index the existing fingerprint without publishing equality across profiles."""
+    message = f"kundali:chart-snapshot:lookup:v1:{profile_id}:{chart_id}".encode()
+    return hmac.digest(encryption_key.encode("ascii"), message, "sha256").hex()
+
+
+def persist_chart_snapshot(
+    db: Session,
+    result: ChartCalculationResponse,
+    *,
+    profile_revision: int,
+    owner_id: uuid.UUID,
+    app_settings: Settings,
+) -> uuid.UUID:
+    """Lock the parent briefly to verify freshness and serialize same-profile inserts."""
+    live_revision = db.scalar(
+        select(BirthProfile.revision)
+        .where(BirthProfile.id == result.profile_id, BirthProfile.owner_id == owner_id)
+        .with_for_update(key_share=True)
+    )
+    if live_revision != profile_revision:
+        raise ChartProfileConflictError(
+            code="PROFILE_CHANGED",
+            detail=(
+                "The birth profile changed or was removed during calculation. "
+                "Reopen the profile and retry."
+            ),
+        )
+
+    key = app_settings.ENCRYPTION_KEY
+    fingerprint = _fingerprint_key(result.profile_id, result.chart.chart_id, key)
+    snapshot_id = db.scalar(
+        select(ChartSnapshot.id).where(
+            ChartSnapshot.profile_id == result.profile_id,
+            ChartSnapshot.profile_revision == profile_revision,
+            ChartSnapshot.schema_version == SNAPSHOT_SCHEMA_VERSION,
+            ChartSnapshot.fingerprint_key == fingerprint,
+        )
+    )
+    if snapshot_id is None:
+        snapshot_id = uuid.uuid4()
+        document = _StoredSnapshotV1(
+            snapshot_id=snapshot_id,
+            profile_revision=profile_revision,
+            result=result,
+            fact_units=ChartFactUnits(),
+        )
+        canonical = json.dumps(
+            document.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        db.add(
+            ChartSnapshot(
+                id=snapshot_id,
+                profile_id=result.profile_id,
+                profile_revision=profile_revision,
+                schema_version=SNAPSHOT_SCHEMA_VERSION,
+                fingerprint_key=fingerprint,
+                payload_enc=encrypt_text(canonical, key),
+            )
+        )
+    db.commit()
+    return snapshot_id
+
+
+def get_chart_snapshot(
+    db: Session, snapshot_id: uuid.UUID, *, owner_id: uuid.UUID, app_settings: Settings
+) -> ChartSnapshotResponse | None:
+    """Read and decrypt a snapshot after checking live profile ownership."""
+    row = db.execute(
+        select(ChartSnapshot, BirthProfile.revision)
+        .join(BirthProfile, ChartSnapshot.profile_id == BirthProfile.id)
+        .where(ChartSnapshot.id == snapshot_id, BirthProfile.owner_id == owner_id)
+        .options(undefer(ChartSnapshot.payload_enc))
+    ).one_or_none()
+    if row is None:
+        return None
+
+    snapshot, current_revision = row
+    if snapshot.schema_version != SNAPSHOT_SCHEMA_VERSION:
+        raise ValueError("Unsupported chart snapshot schema")
+    key = app_settings.ENCRYPTION_KEY
+    stored = _StoredSnapshotV1.model_validate_json(decrypt_text(snapshot.payload_enc, key))
+    if (
+        stored.snapshot_id != snapshot.id
+        or stored.profile_revision != snapshot.profile_revision
+        or stored.result.profile_id != snapshot.profile_id
+        or not hmac.compare_digest(
+            snapshot.fingerprint_key,
+            _fingerprint_key(snapshot.profile_id, stored.result.chart.chart_id, key),
+        )
+    ):
+        raise ValueError("Chart snapshot integrity check failed")
+
+    return ChartSnapshotResponse(
+        **stored.result.model_dump(),
+        snapshot_id=snapshot.id,
+        schema_version=stored.schema_version,
+        profile_revision=stored.profile_revision,
+        is_current_profile_revision=current_revision == stored.profile_revision,
+        created_at=(
+            snapshot.created_at
+            if snapshot.created_at.tzinfo is not None
+            else snapshot.created_at.replace(tzinfo=datetime.UTC)
+        ),
+        fact_units=stored.fact_units,
     )

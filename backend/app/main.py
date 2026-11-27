@@ -52,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+            expose_headers=["Location"],
         )
 
     # Mount API v1 router
@@ -68,7 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, exc: RequestValidationError
     ) -> Response:
         """Strip submitted inputs/context from 422 errors on birth-profile routes."""
-        if request.url.path.startswith("/api/v1/profiles"):
+        if request.url.path.startswith(("/api/v1/profiles", "/api/v1/charts")):
             sanitized_detail = [
                 {
                     "type": str(err.get("type", "validation_error")),

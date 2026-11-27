@@ -22,6 +22,7 @@ from app.db.models import (  # noqa: E402, F401
     AstrologerProfile,
     AuditLog,
     BirthProfile,
+    ChartSnapshot,
     PasswordResetToken,
     RefreshToken,
     User,

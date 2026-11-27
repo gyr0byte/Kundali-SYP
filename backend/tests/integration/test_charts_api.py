@@ -18,10 +18,11 @@ import app.calc.ayanamsha as ayanamsha_mod
 import app.calc.facts as calc_facts_mod
 import app.services.chart_service as chart_service_mod
 from app.api.schemas.chart import ChartCalculationRequest, ChartCalculationResponse
+from app.api.schemas.profile import BirthProfileUpdate
 from app.calc.ayanamsha import CalculationError
-from app.calc.ephemeris import EphemerisSource
-from app.calc.facts import ENGINE_VERSION, ChartFactSensitivity, ChartSettings, compute_chart_facts
-from app.calc.timeconv import TimeConversionError, TimeInput
+from app.calc.ephemeris import EphemerisResult, EphemerisSource, calculate_positions
+from app.calc.facts import ENGINE_VERSION, ChartFactSensitivity, compute_chart_facts
+from app.calc.timeconv import TimeConversionError
 from app.core.clock import FrozenClock
 from app.core.config import Settings
 from app.core.permissions import ROLE_PERMISSIONS, Permission, UserRole
@@ -30,7 +31,8 @@ from app.core.security import (
     encrypt_optional_text,
     encrypt_text,
 )
-from app.db.models import AstrologerStatus, AuditLog, BirthProfile
+from app.db.models import AstrologerStatus, AuditLog, BirthProfile, ChartSnapshot
+from app.services.profile_service import update_profile
 
 
 def _auth_headers(
@@ -68,13 +70,13 @@ def _create_profile(
     return dict(resp.json())
 
 
-def test_chart_endpoint_success_determinism_settings_and_no_persistence(
+def test_chart_endpoint_success_determinism_settings_and_idempotent_persistence(
     client: TestClient,
     db_session: Session,
     user_factory: Any,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Authenticated owner receives deterministic ChartFacts without persisting chart rows."""
+    """Keep the calculation body stable and persist only distinct snapshot identities."""
     caplog.set_level(logging.DEBUG)
 
     user_factory(email="chartowner@example.com", role=UserRole.USER)
@@ -84,10 +86,10 @@ def test_chart_endpoint_success_determinism_settings_and_no_persistence(
     pid = created["id"]
     initial_updated_at = created["updated_at"]
 
-    # Snapshot AuditLog count and verify no chart persistence table is written
+    # Calculations should not append sensitive audit data.
     audit_count_before = db_session.scalar(select(func.count(AuditLog.id))) or 0
 
-    # Commit-guard: chart endpoint must not call Session.commit or add rows
+    # Each request closes the short persistence transaction, including when it reuses a row.
     orig_commit = db_session.commit
     commit_calls = 0
 
@@ -99,13 +101,19 @@ def test_chart_endpoint_success_determinism_settings_and_no_persistence(
     db_session.commit = _counting_commit  # type: ignore[method-assign]
     try:
         # 1. Default calculation with empty JSON {} and completely omitted body match byte-for-byte
-        resp_1 = client.post(f"/api/v1/profiles/{pid}/chart", json={}, headers=headers)
+        resp_1 = client.post(
+            f"/api/v1/profiles/{pid}/chart",
+            json={},
+            headers=headers | {"Origin": "http://localhost:3000"},
+        )
         resp_2 = client.post(f"/api/v1/profiles/{pid}/chart", headers=headers)
         assert resp_1.status_code == 200
         assert resp_2.status_code == 200
         assert resp_1.headers.get("cache-control") == "no-store"
         assert resp_2.headers.get("cache-control") == "no-store"
         assert resp_1.text == resp_2.text
+        assert resp_1.headers["location"] == resp_2.headers["location"]
+        assert "location" in resp_1.headers["access-control-expose-headers"].lower()
 
         parsed = ChartCalculationResponse.model_validate(resp_1.json())
         assert str(parsed.profile_id) == pid
@@ -165,7 +173,8 @@ def test_chart_endpoint_success_determinism_settings_and_no_persistence(
         assert days_data.chart.settings.year_days == 365.2425
         assert days_data.chart.chart_id != parsed.chart.chart_id
 
-        assert commit_calls == 0
+        assert commit_calls == 4
+        assert db_session.scalar(select(func.count(ChartSnapshot.id))) == 3
         assert not db_session.new
         assert not db_session.dirty
         assert not db_session.deleted
@@ -193,6 +202,138 @@ def test_chart_endpoint_success_determinism_settings_and_no_persistence(
     # Zero sensitive data or Fernet ciphertext in logs
     for leaked in ("Fixture 001 Birth", "2006-08-02", "02:10", "Morang", "87.283", "gAAAAA"):
         assert leaked not in caplog.text
+
+
+def test_snapshot_readback_encryption_isolation_and_cascade(
+    client: TestClient, db_session: Session, user_factory: Any, test_settings: Settings
+) -> None:
+    user_factory(email="snapshots@example.com")
+    user_factory(email="snapshot-admin@example.com", role=UserRole.ADMIN)
+    owner = _auth_headers(client, "snapshots@example.com")
+    intruder = _auth_headers(client, "snapshot-admin@example.com")
+    first_profile = _create_profile(client, owner)
+    second_profile = _create_profile(client, owner)
+    other_profile = _create_profile(client, intruder)
+
+    profiles = [(first_profile, owner), (second_profile, owner), (other_profile, intruder)]
+    computed = [client.post(f"/api/v1/profiles/{p['id']}/chart", headers=h) for p, h in profiles]
+    assert all(response.status_code == 200 for response in computed)
+    assert len({response.json()["chart"]["chart_id"] for response in computed}) == 1
+    locations = [response.headers["location"] for response in computed]
+    assert len(set(locations)) == 3
+    location = locations[0]
+    snapshot_id = uuid.UUID(location.rsplit("/", 1)[1])
+    assert len(set(db_session.scalars(select(ChartSnapshot.fingerprint_key)).all())) == 3
+
+    assert client.get(location).status_code == 401
+    assert client.get(location, headers=intruder).status_code == 404
+    assert client.get(locations[2], headers=owner).status_code == 404
+    fingerprint = computed[0].json()["chart"]["chart_id"]
+    assert client.get(f"/api/v1/charts/{fingerprint}", headers=owner).status_code == 422
+    snapshot = client.get(location, headers=owner)
+    assert snapshot.status_code == 200
+    assert snapshot.headers["cache-control"] == "no-store"
+    saved = snapshot.json()
+    assert saved["chart"] == computed[0].json()["chart"]
+    assert saved["schema_version"] == saved["profile_revision"] == 1
+    assert saved["is_current_profile_revision"] is True
+    assert saved["fact_units"] == {"angle": "degree", "speed": "degree/day"}
+
+    ciphertext = db_session.scalar(
+        select(ChartSnapshot.payload_enc).where(ChartSnapshot.id == snapshot_id)
+    )
+    assert ciphertext is not None and ciphertext.startswith(b"gAAAAA")
+    plaintext = Fernet(test_settings.ENCRYPTION_KEY.encode()).decrypt(ciphertext)
+    assert b'"facts"' in plaintext
+    for unused in (b"Fixture 001 Birth", b"Morang", b"87.283"):
+        assert unused not in plaintext
+    assert b'"datetime_utc_iso"' not in ciphertext
+
+    # A migrated row cannot be made to serve another snapshot by swapping ciphertext.
+    first_row = db_session.get(ChartSnapshot, snapshot_id)
+    assert first_row is not None
+    other_row = db_session.get(ChartSnapshot, uuid.UUID(locations[2].rsplit("/", 1)[1]))
+    assert other_row is not None
+    first_row.payload_enc = other_row.payload_enc
+    db_session.commit()
+    corrupt = client.get(location, headers=owner)
+    assert corrupt.status_code == 500
+    assert corrupt.json() == {"detail": "Unable to read chart snapshot"}
+
+    assert (
+        client.delete(f"/api/v1/profiles/{first_profile['id']}", headers=owner).status_code == 204
+    )
+    assert client.get(location, headers=owner).status_code == 404
+    assert (
+        db_session.scalar(select(ChartSnapshot.id).where(ChartSnapshot.id == snapshot_id)) is None
+    )
+    assert client.get(locations[1], headers=owner).status_code == 200
+
+
+@pytest.mark.parametrize("operation", ["edit", "delete"])
+def test_snapshot_rejects_profile_mutated_during_calculation(
+    client: TestClient,
+    db_session: Session,
+    user_factory: Any,
+    test_clock: FrozenClock,
+    test_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    owner = user_factory()
+    owner_id = owner.id
+    headers = _auth_headers(client, owner.email)
+    created = _create_profile(client, headers)
+    profile_id = uuid.UUID(created["id"])
+
+    def mutate_then_compute(*args: Any, **kwargs: Any) -> Any:
+        assert not db_session.in_transaction()
+        profile = db_session.get(BirthProfile, profile_id)
+        assert profile is not None
+        if operation == "edit":
+            # The frozen clock proves timestamp equality cannot hide a changed revision.
+            update_profile(
+                db_session,
+                profile=profile,
+                owner_id=owner_id,
+                payload=BirthProfileUpdate(time_local="04:00"),
+                clock=test_clock,
+                settings=test_settings,
+            )
+        else:
+            db_session.delete(profile)
+            db_session.commit()
+        return compute_chart_facts(*args, **kwargs)
+
+    monkeypatch.setattr(chart_service_mod, "compute_chart_facts", mutate_then_compute)
+    result = client.post(f"/api/v1/profiles/{profile_id}/chart", headers=headers)
+    assert result.status_code == 409
+    assert result.json()["code"] == "PROFILE_CHANGED"
+    assert "location" not in result.headers
+    assert db_session.scalar(select(func.count(ChartSnapshot.id))) == 0
+
+
+def test_snapshot_insert_failure_rolls_back(
+    client: TestClient, db_session: Session, user_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = user_factory()
+    headers = _auth_headers(client, user.email)
+    profile = _create_profile(client, headers)
+
+    def fail_after_flush() -> None:
+        db_session.flush()
+        raise RuntimeError("private storage details")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db_session, "commit", fail_after_flush)
+        response = client.post(f"/api/v1/profiles/{profile['id']}/chart", headers=headers)
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Unable to compute birth chart"}
+    assert "location" not in response.headers
+    assert db_session.scalar(select(func.count(ChartSnapshot.id))) == 0
+    assert (
+        client.post(f"/api/v1/profiles/{profile['id']}/chart", headers=headers).status_code == 200
+    )
 
 
 def test_chart_endpoint_approximate_time_and_lagna_sensitivity(
@@ -634,23 +775,23 @@ def test_chart_endpoint_handles_mixed_ephemeris_provenance(
     headers = _auth_headers(client, "prov@example.com")
     pid = _create_profile(client, headers)["id"]
 
-    orig_calc = calc_facts_mod.compute_chart_facts
-
     def _make_source_variant(source: EphemerisSource) -> Any:
-        def _wrapped(birth_input: TimeInput, settings: ChartSettings) -> Any:
-            doc = orig_calc(birth_input, settings)
-            updated_meta = doc.metadata.model_copy(update={"ephemeris_source": source})
-            return doc.model_copy(update={"metadata": updated_meta})
+        def _wrapped(*args: Any, **kwargs: Any) -> EphemerisResult:
+            return calculate_positions(*args, **kwargs).model_copy(
+                update={"ephemeris_source": source}
+            )
 
         return _wrapped
 
     for expected_source in ("swieph", "moshier", "mixed"):
         monkeypatch.setattr(
-            chart_service_mod, "compute_chart_facts", _make_source_variant(expected_source)
+            calc_facts_mod, "calculate_positions", _make_source_variant(expected_source)
         )
         resp = client.post(f"/api/v1/profiles/{pid}/chart", json={}, headers=headers)
         assert resp.status_code == 200
         assert resp.json()["chart"]["metadata"]["ephemeris_source"] == expected_source
+        saved = client.get(resp.headers["location"], headers=headers)
+        assert saved.json()["chart"]["metadata"]["ephemeris_source"] == expected_source
 
 
 def test_chart_endpoint_profile_edit_updates_chart_id_deterministically(
@@ -684,6 +825,11 @@ def test_chart_endpoint_profile_edit_updates_chart_id_deterministically(
     r2 = client.post(f"/api/v1/profiles/{pid}/chart", json={}, headers=headers)
     assert r2.status_code == 200
     assert r2.json()["profile_updated_at"] == patch_resp.json()["updated_at"]
+    historic = client.get(r1.headers["location"], headers=headers).json()
+    current = client.get(r2.headers["location"], headers=headers).json()
+    assert historic["chart"] == first_chart and not historic["is_current_profile_revision"]
+    assert current["is_current_profile_revision"] is True
+    assert historic["profile_revision"] + 1 == current["profile_revision"]
     edited_chart = r2.json()["chart"]
     assert datetime.fromisoformat(edited_chart["metadata"]["datetime_utc_iso"]) == datetime(
         2006, 8, 1, 21, 30, tzinfo=UTC
@@ -709,3 +855,35 @@ def test_chart_endpoint_profile_edit_updates_chart_id_deterministically(
     r3 = client.post(f"/api/v1/profiles/{pid}/chart", json={}, headers=headers)
     assert r3.status_code == 200
     assert r3.json()["chart"]["chart_id"] == cid_2
+    assert r3.headers["location"] == r2.headers["location"]
+
+
+def test_snapshot_identity_preserves_engine_version_and_revision(
+    client: TestClient, user_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = user_factory()
+    headers = _auth_headers(client, user.email)
+    profile = _create_profile(client, headers)
+    path = f"/api/v1/profiles/{profile['id']}"
+    original = client.post(f"{path}/chart", headers=headers)
+    assert original.status_code == 200
+
+    # A metadata-only profile edit starts a new profile revision even if the chart is identical.
+    assert client.patch(path, json={"label": "Renamed profile"}, headers=headers).status_code == 200
+    renamed = client.post(f"{path}/chart", headers=headers)
+    assert renamed.status_code == 200
+    assert renamed.json()["chart"] == original.json()["chart"]
+    assert renamed.headers["location"] != original.headers["location"]
+    historical = client.get(original.headers["location"], headers=headers).json()
+    assert historical["is_current_profile_revision"] is False
+
+    monkeypatch.setattr(calc_facts_mod, "ENGINE_VERSION", "0.2.99")
+    upgraded = client.post(f"{path}/chart", headers=headers)
+    assert upgraded.status_code == 200
+    assert upgraded.headers["location"] != renamed.headers["location"]
+    assert upgraded.json()["chart"]["engine_version"] == "0.2.99"
+    assert upgraded.json()["chart"]["chart_id"] != renamed.json()["chart"]["chart_id"]
+    assert (
+        client.get(renamed.headers["location"], headers=headers).json()["chart"]
+        == renamed.json()["chart"]
+    )

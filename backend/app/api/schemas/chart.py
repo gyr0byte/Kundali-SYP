@@ -24,6 +24,7 @@ ChartConflictErrorCode = Literal[
     "UNKNOWN_TIME_UNSUPPORTED",
     "INCOMPLETE_BIRTH_DATA",
     "CHART_DATE_OUT_OF_RANGE",
+    "PROFILE_CHANGED",
 ]
 
 
@@ -111,3 +112,23 @@ class ChartConflictErrorResponse(BaseModel):
 
     detail: str
     code: ChartConflictErrorCode
+
+
+class ChartFactUnits(BaseModel):
+    """Units of angular fields and planetary speed in the v1 fact values."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    angle: Literal["degree"] = "degree"
+    speed: Literal["degree/day"] = "degree/day"
+
+
+class ChartSnapshotResponse(ChartCalculationResponse):
+    """An immutable result and its status relative to the profile at read time."""
+
+    snapshot_id: uuid.UUID
+    schema_version: int
+    profile_revision: int
+    is_current_profile_revision: bool
+    created_at: datetime.datetime
+    fact_units: ChartFactUnits
