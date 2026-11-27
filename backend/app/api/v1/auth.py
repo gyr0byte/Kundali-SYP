@@ -29,6 +29,7 @@ from app.core.dependencies import (
 from app.core.mailer import Mailer
 from app.core.rate_limit import InMemoryRateLimiter
 from app.db.models import User
+from app.services.account_locks import lock_user
 from app.services.auth_service import (
     authenticate_user,
     change_password,
@@ -149,7 +150,10 @@ def logout_all(
     clock: Clock = Depends(get_clock),
 ) -> Response:
     """Authenticated endpoint revoking all active sessions for the current user."""
-    revoke_all_tokens(db=db, user_id=current_user.id, clock=clock)
+    user = lock_user(db, current_user.id)
+    if user is not None:
+        revoke_all_tokens(db=db, user_id=user.id, clock=clock)
+    db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

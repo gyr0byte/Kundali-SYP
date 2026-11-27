@@ -24,7 +24,9 @@ from app.core.permissions import UserRole
 from app.core.security import hash_password, validate_password
 from app.db.models import User
 from app.db.session import get_session_factory
-from app.services.auth_service import normalize_email
+from app.services.account_locks import lock_administration, lock_user
+from app.services.audit_service import log_action
+from app.services.auth_service import normalize_email, revoke_all_tokens
 
 
 def create_admin_user(
@@ -40,9 +42,12 @@ def create_admin_user(
     if not valid_pass:
         raise ValueError(err or "Invalid password")
 
-    user = db.scalar(select(User).where(User.email == clean_email))
     hashed = hash_password(password, for_testing=for_testing)
-    now = SystemClock().now()
+    clock = SystemClock()
+    lock_administration(db)
+    user_id = db.scalar(select(User.id).where(User.email == clean_email))
+    user = lock_user(db, user_id) if user_id is not None else None
+    now = clock.now()
 
     if user:
         user.role = UserRole.ADMIN
@@ -51,6 +56,7 @@ def create_admin_user(
         user.failed_login_attempts = 0
         user.locked_until = None
         user.updated_at = now
+        revoke_all_tokens(db, user.id, clock)
     else:
         user = User(
             email=clean_email,
@@ -64,6 +70,8 @@ def create_admin_user(
         )
         db.add(user)
 
+    db.flush()
+    log_action(db, action="user:admin_configure", target_type="user", target_id=str(user.id))
     db.commit()
     db.refresh(user)
     return user

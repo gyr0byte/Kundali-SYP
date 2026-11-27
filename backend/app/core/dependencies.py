@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import Clock, SystemClock
 from app.core.config import Settings, get_settings
 from app.core.mailer import ConsoleMailer, Mailer
+from app.core.permissions import UserRole
 from app.core.rate_limit import InMemoryRateLimiter
 from app.core.security import decode_access_token
 from app.db.session import get_db
@@ -102,6 +103,13 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account is deactivated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if user.role == UserRole.ADMIN and payload.get("role") != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in again to access this account",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

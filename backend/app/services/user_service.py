@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import Clock
 from app.core.permissions import UserRole
 from app.db.models import User
+from app.services.account_locks import lock_administration, lock_user, require_active_admin
 from app.services.audit_service import log_action
 from app.services.auth_service import revoke_all_tokens
 
@@ -50,15 +51,13 @@ def deactivate_user(
     if target_user_id == actor_user_id:
         raise ValueError("Cannot deactivate your own account")
 
-    target = db.get(User, target_user_id)
+    lock_administration(db)
+    target = lock_user(db, target_user_id)
     if not target:
         raise ValueError("User not found")
 
-    if not target.is_active:
-        return
-
     # Check last active admin protection
-    if target.role == UserRole.ADMIN:
+    if target.is_active and target.role == UserRole.ADMIN:
         active_admins = db.scalar(
             select(func.count(User.id)).where(
                 User.role == UserRole.ADMIN,
@@ -67,6 +66,11 @@ def deactivate_user(
         )
         if (active_admins or 0) <= 1:
             raise ValueError("Cannot deactivate the last admin")
+
+    require_active_admin(db, actor_user_id)
+    if not target.is_active:
+        db.commit()
+        return
 
     target.is_active = False
     target.updated_at = clock.now()
@@ -90,7 +94,9 @@ def reactivate_user(
     actor_user_id: uuid.UUID,
 ) -> None:
     """Reactivate a previously deactivated user account."""
-    target = db.get(User, target_user_id)
+    lock_administration(db)
+    require_active_admin(db, actor_user_id)
+    target = lock_user(db, target_user_id)
     if not target:
         raise ValueError("User not found")
 

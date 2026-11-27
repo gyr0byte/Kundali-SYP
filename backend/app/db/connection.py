@@ -76,6 +76,7 @@ def postgres_engine(url: URL, *, pooled: bool = False) -> Engine:
             poolclass=None if pooled else NullPool,
             pool_pre_ping=pooled,
             hide_parameters=True,
+            isolation_level="READ COMMITTED",
         )
     except Exception:
         raise DatabaseConfigurationError("Unable to initialize PostgreSQL driver.") from None

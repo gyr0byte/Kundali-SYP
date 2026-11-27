@@ -22,6 +22,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.models import PasswordResetToken, RefreshToken, User
+from app.services.account_locks import lock_user
 from app.services.audit_service import log_action
 
 
@@ -68,13 +69,13 @@ def register_user(
         updated_at=now,
     )
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    db.flush()
 
     log_action(
         db, action="auth:register", actor_id=user.id, target_type="user", target_id=str(user.id)
     )
     db.commit()
+    db.refresh(user)
 
     return user
 
@@ -86,8 +87,7 @@ def authenticate_user(
     clock: Clock,
     for_testing: bool = False,
 ) -> User:
-    """Authenticate user with constant-time mitigation and account lockout defenses."""
-    now = clock.now()
+    """Authenticate and retain the account lock until the caller issues tokens and commits."""
     try:
         clean_email = normalize_email(email)
     except ValueError:
@@ -95,7 +95,9 @@ def authenticate_user(
         dummy_verify_password()
         raise ValueError("Invalid email or password") from None
 
-    user = db.scalar(select(User).where(User.email == clean_email))
+    user_id = db.scalar(select(User.id).where(User.email == clean_email))
+    user = lock_user(db, user_id) if user_id is not None else None
+    now = clock.now()
 
     if not user:
         # Unknown email: run dummy verification to prevent user enumeration
@@ -138,8 +140,7 @@ def authenticate_user(
     if password_needs_rehash(user.password_hash):
         user.password_hash = hash_password(password, for_testing=for_testing)
 
-    db.commit()
-    db.refresh(user)
+    db.flush()
     return user
 
 
@@ -150,6 +151,10 @@ def create_token_pair(
     settings: Settings,
 ) -> tuple[str, str]:
     """Create a new access token and refresh token pair."""
+    locked_user = lock_user(db, user.id)
+    if locked_user is None or not locked_user.is_active:
+        raise ValueError("Invalid email or password")
+    user = locked_user
     now = clock.now()
     access_token = create_access_token(
         subject=str(user.id),
@@ -175,34 +180,54 @@ def create_token_pair(
     return access_token, raw_refresh
 
 
+def _lock_refresh_owner(db: Session, token_hash: str) -> tuple[User, RefreshToken] | None:
+    # The first lookup finds the owner only. Read token state again after taking the lock.
+    user_id = db.scalar(select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash))
+    user = lock_user(db, user_id) if user_id is not None else None
+    if user is None:
+        return None
+    token = db.scalar(
+        select(RefreshToken)
+        .where(RefreshToken.token_hash == token_hash)
+        .execution_options(populate_existing=True)
+    )
+    return (user, token) if token is not None else None
+
+
+def _revoke_family(db: Session, token: RefreshToken, clock: Clock) -> int:
+    result = db.execute(
+        update(RefreshToken)
+        .where(
+            RefreshToken.user_id == token.user_id,
+            RefreshToken.family_id == token.family_id,
+            RefreshToken.revoked_at.is_(None),
+        )
+        .values(revoked_at=clock.now())
+    )
+    return int(result.rowcount)  # type: ignore[attr-defined]
+
+
 def refresh_tokens(
     db: Session,
     raw_refresh_token: str,
     clock: Clock,
     settings: Settings,
 ) -> tuple[str, str]:
-    """Rotate refresh token.
+    """Consume and replace once. Reuse of any revoked ancestor revokes its family.
 
-    If reuse of an already revoked token is detected, revokes the entire family.
+    With simultaneous uses of the same token, only the first can issue a replacement.
+    The second is treated as reuse and commits revocation and its audit event before failing.
     """
-    now = clock.now()
-    token_hash = hash_token(raw_refresh_token)
-
-    token = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
-    if not token:
+    locked = _lock_refresh_owner(db, hash_token(raw_refresh_token))
+    if locked is None:
         raise ValueError("Invalid or expired refresh token")
+    user, token = locked
+    now = clock.now()
 
     # Check reuse detection: was token already revoked?
     if token.revoked_at is not None:
         # Immediate family-wide revocation
-        db.execute(
-            update(RefreshToken)
-            .where(
-                RefreshToken.family_id == token.family_id,
-                RefreshToken.revoked_at.is_(None),
-            )
-            .values(revoked_at=now)
-        )
+        _revoke_family(db, token, clock)
         log_action(
             db,
             action="auth:token_reuse_detected",
@@ -221,8 +246,7 @@ def refresh_tokens(
         db.commit()
         raise ValueError("Invalid or expired refresh token")
 
-    user = db.get(User, token.user_id)
-    if not user or not user.is_active:
+    if not user.is_active:
         token.revoked_at = now
         db.commit()
         raise ValueError("Invalid or expired refresh token")
@@ -260,20 +284,17 @@ def revoke_token(
     raw_refresh_token: str,
     clock: Clock,
 ) -> bool:
-    """Revoke a single refresh token (public logout endpoint).
+    """Log out one session, including a replacement issued just before logout.
 
-    Returns True if token existed and was revoked; False if token was unknown or already revoked.
+    An unknown token or a fully revoked family is a no-op. Other sessions are untouched.
     """
-    now = clock.now()
-    token_hash = hash_token(raw_refresh_token)
-    token = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
-
-    if not token or token.revoked_at is not None:
+    locked = _lock_refresh_owner(db, hash_token(raw_refresh_token))
+    if locked is None:
         return False
-
-    token.revoked_at = now
+    _, token = locked
+    changed = _revoke_family(db, token, clock)
     db.commit()
-    return True
+    return changed > 0
 
 
 def revoke_all_tokens(
@@ -281,7 +302,7 @@ def revoke_all_tokens(
     user_id: uuid.UUID,
     clock: Clock,
 ) -> int:
-    """Revoke all active refresh tokens for the given user."""
+    """Stage revocation for an account already locked by the calling transaction."""
     now = clock.now()
     result = db.execute(
         update(RefreshToken)
@@ -291,7 +312,6 @@ def revoke_all_tokens(
         )
         .values(revoked_at=now)
     )
-    db.commit()
     return int(result.rowcount)  # type: ignore[attr-defined]
 
 
@@ -304,6 +324,10 @@ def change_password(
     for_testing: bool = False,
 ) -> None:
     """Change user password, verifying old password and revoking all active sessions."""
+    locked_user = lock_user(db, user.id)
+    if locked_user is None or not locked_user.is_active:
+        raise ValueError("Invalid current password")
+    user = locked_user
     if not verify_password(old_password, user.password_hash):
         raise ValueError("Invalid current password")
 
@@ -337,16 +361,17 @@ def request_password_reset(
 
     Returns token string for dev/testing, but endpoint always responds 202.
     """
-    now = clock.now()
     try:
         clean_email = normalize_email(email)
     except ValueError:
         return None
 
-    user = db.scalar(select(User).where(User.email == clean_email))
+    user_id = db.scalar(select(User.id).where(User.email == clean_email))
+    user = lock_user(db, user_id) if user_id is not None else None
     if not user or not user.is_active:
         return None
 
+    now = clock.now()
     raw_token = generate_raw_token()
     token_hash = hash_token(raw_token)
 
@@ -374,16 +399,21 @@ def reset_password(
     for_testing: bool = False,
 ) -> None:
     """Reset password using a valid, unused, unexpired reset token."""
-    now = clock.now()
     token_hash = hash_token(raw_reset_token)
-
-    token = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash))
+    user_id = db.scalar(
+        select(PasswordResetToken.user_id).where(PasswordResetToken.token_hash == token_hash)
+    )
+    user = lock_user(db, user_id) if user_id is not None else None
+    if user is None or not user.is_active:
+        raise ValueError("Invalid or expired reset token")
+    now = clock.now()
+    token = db.scalar(
+        select(PasswordResetToken)
+        .where(PasswordResetToken.token_hash == token_hash)
+        .execution_options(populate_existing=True)
+    )
     expires_at = ensure_utc(token.expires_at) if token else None
     if not token or token.used_at is not None or (expires_at and expires_at <= now):
-        raise ValueError("Invalid or expired reset token")
-
-    user = db.get(User, token.user_id)
-    if not user or not user.is_active:
         raise ValueError("Invalid or expired reset token")
 
     valid_pass, err = validate_password(new_password, user.email)

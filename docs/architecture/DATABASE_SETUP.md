@@ -8,7 +8,9 @@ Manual verification covered Neon Singapore PostgreSQL 16.16 over a direct connec
 
 The restricted runtime role passed the application settings and SQLAlchemy engine smoke test. The developer verified DPAPI credential storage and loading in a fresh PowerShell session, plus validation of the stable JWT and Fernet keys. FastAPI startup, health, registration, login, authenticated profile listing, creation, retrieval and deletion passed. Reading the deleted profile returned HTTP 404. PostgreSQL persisted `auth:register`, `profile:create` and `profile:delete` audit events.
 
-Concurrent refresh-token rotation and admin invariants still need verification, as does the full browser-to-database flow. A portable secure recovery backup for the Fernet key remains pending. The migration role retains elevated development-only privileges. The disposable integration database and synthetic development account remain in place.
+Transaction hardening passed 103 focused offline tests and all nine cases in a separate disposable PostgreSQL concurrency suite (66.50 seconds, exit code 0). Live checks covered duplicate refresh consumption and family revocation, refresh racing with logout and password reset, last-active-admin protection, overlapping approval and activation changes, and rollback when an audit write fails. Alembic compatibility, pgvector and encrypted profile CRUD passed again. No new migration was required. Ruff, formatting, mypy and whitespace checks passed. The known Starlette/httpx deprecation warning remains.
+
+Existing access JWTs can remain valid until expiry. Strict reuse detection can revoke a token family after a legitimate duplicate refresh request. Direct SQL writers can bypass application locks. Full browser-to-database verification and a portable, secure Fernet recovery backup remain pending. The migration role retains elevated development-only privileges. The disposable concurrency database retains its migrated schema and synthetic test data. The earlier integration database and synthetic development account also remain in place.
 
 | Role | Purpose and grants |
 |---|---|

@@ -120,7 +120,7 @@ RBAC_ENDPOINTS = [
             "pending_astrologer": 400,
             "approved_astrologer": 400,
             "suspended_astrologer": 400,
-            "admin": 201,
+            "admin": 400,
         },
     ),
     # 5. GET /api/v1/review/queue

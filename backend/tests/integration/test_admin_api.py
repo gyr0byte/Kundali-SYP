@@ -1,11 +1,28 @@
 """Integration tests for admin management endpoints."""
 
+from datetime import timedelta
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
+from app.core.config import Settings
 from app.core.permissions import UserRole
+from app.core.security import create_access_token
 from app.db.models import AstrologerStatus
+
+
+def test_pre_promotion_access_token_cannot_gain_admin_access(
+    client: TestClient, db_session: Session, test_settings: Settings, user_factory: Any
+) -> None:
+    user = user_factory()
+    access = create_access_token(
+        str(user.id), UserRole.USER, test_settings.JWT_SECRET, timedelta(minutes=5)
+    )
+    user.role = UserRole.ADMIN
+    db_session.commit()
+    response = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {access}"})
+    assert response.status_code == 401
 
 
 def test_admin_user_management(client: TestClient, user_factory: Any) -> None:

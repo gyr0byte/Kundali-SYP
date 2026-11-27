@@ -18,6 +18,7 @@ from app.core.clock import Clock
 from app.core.dependencies import get_clock, get_current_user, get_db
 from app.core.permissions import UserRole, require_role
 from app.db.models import AstrologerStatus, AuditLog, User
+from app.services.account_locks import AdministrativeAuthorizationError
 from app.services.astrologer_service import (
     approve_astrologer,
     list_astrologers,
@@ -30,6 +31,17 @@ router = APIRouter(
     tags=["admin"],
     dependencies=[Depends(require_role(UserRole.ADMIN))],
 )
+
+
+def _mutation_error(error: ValueError) -> HTTPException:
+    if isinstance(error, AdministrativeAuthorizationError):
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
+    code = (
+        status.HTTP_404_NOT_FOUND
+        if "not found" in str(error).lower()
+        else status.HTTP_400_BAD_REQUEST
+    )
+    return HTTPException(status_code=code, detail=str(error))
 
 
 @router.get("/users", response_model=UserListResponse)
@@ -67,12 +79,7 @@ def deactivate(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except ValueError as e:
-        status_code = (
-            status.HTTP_404_NOT_FOUND
-            if "not found" in str(e).lower()
-            else status.HTTP_400_BAD_REQUEST
-        )
-        raise HTTPException(status_code=status_code, detail=str(e)) from None
+        raise _mutation_error(e) from None
 
 
 @router.post("/users/{user_id}/reactivate", status_code=status.HTTP_204_NO_CONTENT)
@@ -90,12 +97,7 @@ def reactivate(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except ValueError as e:
-        status_code = (
-            status.HTTP_404_NOT_FOUND
-            if "not found" in str(e).lower()
-            else status.HTTP_400_BAD_REQUEST
-        )
-        raise HTTPException(status_code=status_code, detail=str(e)) from None
+        raise _mutation_error(e) from None
 
 
 @router.get("/astrologers", response_model=AstrologerListResponse)
@@ -132,12 +134,7 @@ def approve(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except ValueError as e:
-        status_code = (
-            status.HTTP_404_NOT_FOUND
-            if "not found" in str(e).lower()
-            else status.HTTP_400_BAD_REQUEST
-        )
-        raise HTTPException(status_code=status_code, detail=str(e)) from None
+        raise _mutation_error(e) from None
 
 
 @router.post("/astrologers/{user_id}/suspend", status_code=status.HTTP_204_NO_CONTENT)
@@ -157,12 +154,7 @@ def suspend(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except ValueError as e:
-        status_code = (
-            status.HTTP_404_NOT_FOUND
-            if "not found" in str(e).lower()
-            else status.HTTP_400_BAD_REQUEST
-        )
-        raise HTTPException(status_code=status_code, detail=str(e)) from None
+        raise _mutation_error(e) from None
 
 
 @router.get("/audit", response_model=AuditLogListResponse)

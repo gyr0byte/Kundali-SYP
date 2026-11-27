@@ -2,8 +2,12 @@
 
 import os
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from queue import Queue
+from threading import Event
+from time import monotonic
 from typing import Any
 
 import pytest
@@ -12,12 +16,22 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select, text
 from sqlalchemy.engine import URL, Engine
 from sqlalchemy.orm import Session
 
+from app.core.clock import FrozenClock
+from app.core.config import Settings
+from app.core.mailer import ConsoleMailer
+from app.core.permissions import UserRole
+from app.core.security import hash_token
 from app.db.base import Base
 from app.db.connection import DatabaseConfigurationError, postgres_engine, postgres_url
+from app.db.models import AstrologerProfile, AstrologerStatus, AuditLog, RefreshToken, User
+from app.services import auth_service, user_service
+from app.services.account_locks import lock_administration, lock_user
+from app.services.astrologer_service import approve_astrologer
+from app.services.audit_service import log_action
 
 BACKEND = Path(__file__).resolve().parents[2]
 
@@ -173,3 +187,212 @@ def test_encrypted_profile_crud_and_ownership(
     assert updated.json()["label"] == "Updated sample"
     assert client.delete(path, headers=owner).status_code == 204
     assert client.get(path, headers=owner).status_code == 404
+
+
+def _run_blocked_race[T](
+    engine: Engine,
+    hold_lock: Callable[[Session], object],
+    first: Callable[[Session], T],
+    second: Callable[[Session], None],
+) -> T:
+    """Require PostgreSQL to report real blocking before committing the first transaction."""
+    pids: Queue[int] = Queue()
+
+    def run_second() -> None:
+        with Session(engine) as db:
+            db.execute(text("SET LOCAL lock_timeout = '20s'"))
+            pid = db.scalar(text("SELECT pg_backend_pid()"))
+            assert isinstance(pid, int)
+            pids.put(pid)
+            second(db)
+
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with Session(engine) as db, engine.connect() as observer:
+            db.execute(text("SET LOCAL lock_timeout = '20s'"))
+            first_pid = db.scalar(text("SELECT pg_backend_pid()"))
+            hold_lock(db)
+            pending = workers.submit(run_second)
+            second_pid = pids.get(timeout=10)
+            assert first_pid != second_pid
+
+            deadline = monotonic() + 10
+            poll = Event()
+            while not observer.scalar(
+                text("SELECT :holder = ANY(pg_blocking_pids(:waiter))"),
+                {"holder": first_pid, "waiter": second_pid},
+            ):
+                assert not pending.done(), "Second operation completed without taking the lock"
+                assert monotonic() < deadline, "PostgreSQL never reported the expected wait"
+                poll.wait(0.02)
+            result = first(db)
+        pending.result(timeout=25)
+    return result
+
+
+def test_concurrent_refresh_has_one_successor_and_replay_revokes_its_family(
+    migrated_engine: Engine, db_session: Session, test_clock: FrozenClock, test_settings: Settings
+) -> None:
+    user = User(email="rotation@example.com", password_hash="unused-fixture")
+    db_session.add(user)
+    db_session.commit()
+    user_id = user.id
+    _, original = auth_service.create_token_pair(db_session, user, test_clock, test_settings)
+    _, independent = auth_service.create_token_pair(db_session, user, test_clock, test_settings)
+
+    def replay(db: Session) -> None:
+        with pytest.raises(ValueError, match="Invalid or expired refresh token"):
+            auth_service.refresh_tokens(db, original, test_clock, test_settings)
+
+    _, replacement = _run_blocked_race(
+        migrated_engine,
+        lambda db: lock_user(db, user_id),
+        lambda db: auth_service.refresh_tokens(db, original, test_clock, test_settings),
+        replay,
+    )
+    with Session(migrated_engine) as db:
+        tokens = db.scalars(select(RefreshToken).where(RefreshToken.user_id == user_id)).all()
+        by_hash = {token.token_hash: token for token in tokens}
+        old = by_hash[hash_token(original)]
+        new = by_hash[hash_token(replacement)]
+        assert len(tokens) == 3
+        assert new.replaced_by_id == old.id and new.family_id == old.family_id
+        assert old.revoked_at is not None and new.revoked_at is not None
+        assert by_hash[hash_token(independent)].revoked_at is None
+        assert db.scalars(select(AuditLog.action).where(AuditLog.actor_id == user_id)).all() == [
+            "auth:token_reuse_detected"
+        ]
+
+
+@pytest.mark.parametrize("operation", ["logout", "reset"])
+def test_waiting_session_revocation_includes_concurrent_refresh_replacement(
+    migrated_engine: Engine,
+    db_session: Session,
+    test_clock: FrozenClock,
+    test_settings: Settings,
+    user_factory: Any,
+    operation: str,
+) -> None:
+    user = user_factory(email=f"rotation-{operation}@example.com")
+    user_id = user.id
+    _, original = auth_service.create_token_pair(db_session, user, test_clock, test_settings)
+    reset = auth_service.request_password_reset(
+        db_session, user.email, test_clock, ConsoleMailer(environment="test"), test_settings
+    )
+    assert reset is not None
+
+    def revoke(db: Session) -> None:
+        if operation == "logout":
+            assert auth_service.revoke_token(db, original, test_clock)
+        else:
+            auth_service.reset_password(db, reset, "NewFixturePassword2026!", test_clock, True)
+
+    _, replacement = _run_blocked_race(
+        migrated_engine,
+        lambda db: lock_user(db, user_id),
+        lambda db: auth_service.refresh_tokens(db, original, test_clock, test_settings),
+        revoke,
+    )
+    with Session(migrated_engine) as db:
+        token = db.scalar(
+            select(RefreshToken).where(RefreshToken.token_hash == hash_token(replacement))
+        )
+        assert token is not None and token.revoked_at is not None
+
+
+def test_admin_deactivation_and_approval_cannot_remove_last_admin(
+    migrated_engine: Engine, db_session: Session, test_clock: FrozenClock, user_factory: Any
+) -> None:
+    first_id = user_factory(
+        email="first-admin@example.com",
+        role=UserRole.ADMIN,
+        astrologer_status=AstrologerStatus.PENDING,
+    ).id
+    second_id = user_factory(email="second-admin@example.com", role=UserRole.ADMIN).id
+
+    def other_deactivation(db: Session) -> None:
+        with pytest.raises(ValueError, match="Cannot deactivate the last admin"):
+            user_service.deactivate_user(db, first_id, second_id, test_clock)
+
+    _run_blocked_race(
+        migrated_engine,
+        lock_administration,
+        lambda db: user_service.deactivate_user(db, second_id, first_id, test_clock),
+        other_deactivation,
+    )
+    with Session(migrated_engine) as db:
+        assert db.scalars(
+            select(User.id).where(User.role == UserRole.ADMIN, User.is_active)
+        ).all() == [first_id]
+        assert db.scalars(
+            select(AuditLog.action).where(AuditLog.target_id == str(second_id))
+        ).all() == ["user:deactivate"]
+
+    def legacy_approval(db: Session) -> None:
+        with pytest.raises(ValueError, match="Cannot approve an administrator"):
+            approve_astrologer(db, first_id, first_id, test_clock)
+
+    _run_blocked_race(
+        migrated_engine,
+        lock_administration,
+        lambda db: user_service.reactivate_user(db, second_id, first_id),
+        legacy_approval,
+    )
+
+    def deactivate_after_approval(db: Session) -> None:
+        user_service.deactivate_user(db, applicant_id, first_id, test_clock)
+
+    applicant_id = user_factory(
+        email="racing-applicant@example.com", astrologer_status=AstrologerStatus.PENDING
+    ).id
+    _run_blocked_race(
+        migrated_engine,
+        lock_administration,
+        lambda db: approve_astrologer(db, applicant_id, first_id, test_clock),
+        deactivate_after_approval,
+    )
+    with Session(migrated_engine) as db:
+        first, second, applicant = (
+            db.get(User, key) for key in (first_id, second_id, applicant_id)
+        )
+        assert first is not None and first.is_active and first.role == UserRole.ADMIN
+        assert second is not None and second.is_active and second.role == UserRole.ADMIN
+        assert (
+            applicant is not None
+            and not applicant.is_active
+            and applicant.role == UserRole.ASTROLOGER
+        )
+        profile = db.get(AstrologerProfile, first_id)
+        assert profile is not None and profile.status == AstrologerStatus.PENDING
+        assert (
+            db.scalars(select(AuditLog.action).where(AuditLog.target_id == str(first_id))).all()
+            == []
+        )
+
+
+def test_postgres_audit_failure_rolls_back_deactivation_and_token_revocation(
+    migrated_engine: Engine,
+    db_session: Session,
+    test_clock: FrozenClock,
+    test_settings: Settings,
+    user_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin_id = user_factory(email="audit-admin@example.com", role=UserRole.ADMIN).id
+    account = user_factory(email="audit-target@example.com")
+    account_id = account.id
+    _, raw = auth_service.create_token_pair(db_session, account, test_clock, test_settings)
+
+    def fail_after_audit(*args: Any, **kwargs: Any) -> None:
+        log_action(*args, **kwargs)
+        raise RuntimeError("Audit failure")
+
+    monkeypatch.setattr(user_service, "log_action", fail_after_audit)
+    with pytest.raises(RuntimeError, match="Audit failure"), Session(migrated_engine) as db:
+        user_service.deactivate_user(db, account_id, admin_id, test_clock)
+
+    with Session(migrated_engine) as db:
+        user = db.get(User, account_id)
+        assert user is not None and user.is_active
+        token = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw)))
+        assert token is not None and token.revoked_at is None
+        assert db.scalar(select(AuditLog.id).where(AuditLog.target_id == str(account_id))) is None

@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.core.clock import Clock
 from app.core.permissions import UserRole
-from app.db.models import AstrologerProfile, AstrologerStatus, User
+from app.db.models import AstrologerProfile, AstrologerStatus
+from app.services.account_locks import lock_administration, lock_user, require_active_admin
 from app.services.audit_service import log_action
 from app.services.auth_service import revoke_all_tokens
 
@@ -21,9 +22,11 @@ def apply_for_astrologer(
     tradition: str,
 ) -> AstrologerProfile:
     """Submit an astrologer application."""
-    user = db.get(User, user_id)
-    if not user:
+    user = lock_user(db, user_id)
+    if not user or not user.is_active:
         raise ValueError("User not found")
+    if user.role == UserRole.ADMIN:
+        raise ValueError("Administrators cannot apply as astrologers")
 
     existing = db.get(AstrologerProfile, user_id)
     if existing:
@@ -75,13 +78,17 @@ def approve_astrologer(
     clock: Clock,
 ) -> None:
     """Approve an astrologer profile and upgrade the user's role to astrologer."""
-    profile = db.get(AstrologerProfile, user_id)
-    if not profile:
-        raise ValueError("Astrologer profile not found")
-
-    user = db.get(User, user_id)
+    lock_administration(db)
+    require_active_admin(db, admin_id)
+    user = lock_user(db, user_id)
     if not user:
         raise ValueError("User not found")
+    if user.role == UserRole.ADMIN:
+        raise ValueError("Cannot approve an administrator as an astrologer")
+
+    profile = db.get(AstrologerProfile, user_id, populate_existing=True)
+    if not profile:
+        raise ValueError("Astrologer profile not found")
 
     now = clock.now()
     profile.status = AstrologerStatus.APPROVED
@@ -108,7 +115,14 @@ def suspend_astrologer(
     clock: Clock,
 ) -> None:
     """Suspend an astrologer profile and revoke active sessions."""
-    profile = db.get(AstrologerProfile, user_id)
+    lock_administration(db)
+    require_active_admin(db, admin_id)
+    user = lock_user(db, user_id)
+    if not user:
+        raise ValueError("User not found")
+    if user.role == UserRole.ADMIN:
+        raise ValueError("Cannot suspend an administrator as an astrologer")
+    profile = db.get(AstrologerProfile, user_id, populate_existing=True)
     if not profile:
         raise ValueError("Astrologer profile not found")
 
