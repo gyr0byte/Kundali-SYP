@@ -78,6 +78,7 @@ class Citation(Record):
 
 
 class Match(Citation):
+    applicability: Applicability
     conditional: bool
 
 
@@ -89,7 +90,7 @@ def _tokens(text: str) -> set[str]:
     return set("".join(c if category(c)[0] in "LMN" else " " for c in folded).split())
 
 
-def _applicable(rule: Applicability, search: Search) -> bool | None:
+def applicability_condition(rule: Applicability, search: Search) -> bool | None:
     """Return conditionality on a match, or None when evidence is absent."""
     if isinstance(rule, DashaRule):
         if search.evaluation is None or search.evaluation.instant.utcoffset() is None:
@@ -118,6 +119,15 @@ def _applicable(rule: Applicability, search: Search) -> bool | None:
         if matches:
             return fact.certainty == "approximate"
     return None
+
+
+def matches_target(rule: Applicability, target: Applicability) -> bool:
+    return rule == target or (
+        isinstance(rule, DashaRule)
+        and isinstance(target, DashaRule)
+        and rule.parent_lord is None
+        and rule == target.model_copy(update={"parent_lord": None})
+    )
 
 
 def eligible_statement(*, current: bool) -> Select[KnowledgeChunk, KnowledgeSource]:
@@ -201,28 +211,29 @@ def search_statement(search: Search) -> Select[KnowledgeChunk, KnowledgeSource]:
 
 
 def match_candidate(chunk: KnowledgeChunk, source: KnowledgeSource, search: Search) -> Match | None:
+    if (
+        not source.enabled
+        or source.collection != "production"
+        or source.rights_status not in CLEARED
+        or chunk.editorial_status != "approved"
+        or (chunk.source_id, chunk.source_version) != (source.source_id, source.version)
+        or chunk.topic not in search.topics
+        or chunk.language not in search.languages
+    ):
+        return None
     try:
         rule = _RULE.validate_python(chunk.applicability)
     except ValidationError:
         return None
-    if search.targets and not any(
-        rule == target
-        or (
-            isinstance(rule, DashaRule)
-            and isinstance(target, DashaRule)
-            and rule.parent_lord is None
-            and rule == target.model_copy(update={"parent_lord": None})
-        )
-        for target in search.targets
-    ):
+    if search.targets and not any(matches_target(rule, target) for target in search.targets):
         return None
-    conditional = _applicable(rule, search)
+    conditional = applicability_condition(rule, search)
     if conditional is None:
         return None
     citation = _citation(chunk, source, rule)
     if citation is None:
         return None
-    return Match(**citation.model_dump(), conditional=conditional)
+    return Match(**citation.model_dump(), applicability=rule, conditional=conditional)
 
 
 def validated_citation(chunk: KnowledgeChunk, source: KnowledgeSource) -> Citation | None:

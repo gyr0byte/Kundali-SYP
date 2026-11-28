@@ -22,6 +22,20 @@ _PLANET = TypeAdapter(Planet)
 _SIGN = TypeAdapter(Sign)
 
 
+def project_placement(
+    fact: ChartFactPlacement,
+    certainty: Literal["exact", "approximate"],
+) -> PlacementEvidence:
+    return PlacementEvidence(
+        planet=_PLANET.validate_python(fact.planet),
+        house=fact.house,
+        sign=_SIGN.validate_python(fact.sign),
+        nakshatra=fact.nakshatra,
+        pada=fact.pada,
+        certainty=certainty,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AuthorizedEvidence:
     """Local projection from server-side chart results after the caller checked ownership."""
@@ -44,14 +58,7 @@ def project_authorized_evidence(
         "approximate" if snapshot.time_certainty == TimeCertainty.APPROXIMATE else "exact"
     )
     placements = tuple(
-        PlacementEvidence(
-            planet=_PLANET.validate_python(fact.planet),
-            house=fact.house,
-            sign=_SIGN.validate_python(fact.sign),
-            nakshatra=fact.nakshatra,
-            pada=fact.pada,
-            certainty=certainty,
-        )
+        project_placement(fact, certainty)
         for fact in snapshot.chart.facts
         if isinstance(fact, ChartFactPlacement)
     )
