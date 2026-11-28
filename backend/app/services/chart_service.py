@@ -9,7 +9,7 @@ import uuid
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session, undefer
 
 from app.api.schemas.chart import (
@@ -336,15 +336,32 @@ def persist_chart_snapshot(
     return snapshot_id
 
 
+def _owned_snapshot(snapshot_id: uuid.UUID, owner_id: uuid.UUID) -> Select[ChartSnapshot, int]:
+    return (
+        select(ChartSnapshot, BirthProfile.revision)
+        .join(BirthProfile, ChartSnapshot.profile_id == BirthProfile.id)
+        .where(ChartSnapshot.id == snapshot_id, BirthProfile.owner_id == owner_id)
+    )
+
+
+def get_owned_snapshot_revisions(
+    db: Session, snapshot_id: uuid.UUID, *, owner_id: uuid.UUID
+) -> tuple[int, int] | None:
+    """Check ownership and revision without loading or decrypting snapshot content."""
+    row = db.execute(
+        _owned_snapshot(snapshot_id, owner_id).with_only_columns(
+            ChartSnapshot.profile_revision, BirthProfile.revision
+        )
+    ).one_or_none()
+    return (row[0], row[1]) if row is not None else None
+
+
 def get_chart_snapshot(
     db: Session, snapshot_id: uuid.UUID, *, owner_id: uuid.UUID, app_settings: Settings
 ) -> SnapshotResponse | None:
     """Read and decrypt a snapshot after checking live profile ownership."""
     row = db.execute(
-        select(ChartSnapshot, BirthProfile.revision)
-        .join(BirthProfile, ChartSnapshot.profile_id == BirthProfile.id)
-        .where(ChartSnapshot.id == snapshot_id, BirthProfile.owner_id == owner_id)
-        .options(undefer(ChartSnapshot.payload_enc))
+        _owned_snapshot(snapshot_id, owner_id).options(undefer(ChartSnapshot.payload_enc))
     ).one_or_none()
     if row is None:
         return None

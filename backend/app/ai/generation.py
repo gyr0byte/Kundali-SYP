@@ -16,6 +16,7 @@ from app.ai.intent import AuthorizedEvidence, project_authorized_evidence, resol
 from app.ai.llm_adapter import (
     MALFORMED_SELECTION_CORRECTION,
     ClaimChoice,
+    GenerationAbstained,
     GenerationProvider,
     GenerationRequest,
 )
@@ -260,6 +261,8 @@ async def _ask(
         return FallbackCode.PROVIDER_FAILURE
     try:
         return task.result()
+    except GenerationAbstained:
+        return FallbackCode.INSUFFICIENT_KNOWLEDGE
     except TimeoutError:
         return FallbackCode.PROVIDER_TIMEOUT
     except Exception:

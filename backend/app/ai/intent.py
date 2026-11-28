@@ -107,6 +107,13 @@ class IntentResolution:
     intent: EmbeddingQuery | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class QuestionOptions:
+    chart_scoped: bool
+    active_dasha: bool
+    mode: Literal["interpretation", "facts"]
+
+
 def _words(value: str) -> list[str]:
     local = normalize("NFKC", value).casefold()
     return "".join(char if category(char)[0] in "LMN" else " " for char in local).split()
@@ -305,6 +312,21 @@ def _resolved(scope: Scope, **target: object) -> IntentResolution:
         "resolved",
         scope=scope,
         intent=EmbeddingQuery.model_validate({"targets": [target]}),
+    )
+
+
+def question_options(question: str) -> QuestionOptions:
+    """Identify which evidence to load without resolving meaning from unverified data."""
+    parsed = _parse(question) or {}
+    chart = bool({"chart", "current"} & parsed.keys())
+    return QuestionOptions(
+        chart_scoped=chart,
+        active_dasha=chart and len(parsed.get("level", ())) == 1,
+        mode=(
+            "interpretation"
+            if not chart or "general" in parsed or "mean" in parsed.get("grammar", ())
+            else "facts"
+        ),
     )
 
 

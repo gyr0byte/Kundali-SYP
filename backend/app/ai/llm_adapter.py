@@ -3,20 +3,14 @@
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from app.ai.schemas import Locale
+from app.ai.schemas import ClaimKind, Locale
 from app.knowledge.chunking import Applicability
 
 
 @dataclass(frozen=True, slots=True)
 class ClaimChoice:
     number: int
-    kind: Literal[
-        "chart_fact",
-        "dasha_fact",
-        "general_explanation",
-        "interpretation",
-        "conditional_interpretation",
-    ]
+    kind: ClaimKind
     target: Applicability
 
 
@@ -46,3 +40,7 @@ class GenerationProvider(Protocol):
     async def generate(self, request: GenerationRequest) -> str | bytes:
         """Return JSON with a choices array. Cooperate with asyncio cancellation."""
         ...
+
+
+class GenerationAbstained(RuntimeError):
+    """The selector has no defensible choice from the provided options."""

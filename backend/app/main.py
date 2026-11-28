@@ -14,6 +14,8 @@ from app.api.v1.astrologer import router as astrologer_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.birthplaces import router as birthplaces_router
 from app.api.v1.charts import router as charts_router
+from app.api.v1.chat import CHAT_PATH
+from app.api.v1.chat import router as chat_router
 from app.api.v1.profiles import router as profiles_router
 from app.calc.bikram_sambat import CALENDAR_DATE_ERROR_CODES
 from app.core.config import Settings, get_settings
@@ -72,16 +74,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api_v1.include_router(birthplaces_router)
     api_v1.include_router(profiles_router)
     api_v1.include_router(charts_router)
+    api_v1.include_router(chat_router)
     app.include_router(api_v1)
 
     @app.middleware("http")
-    async def prevent_dasha_caching(
+    async def prevent_private_response_caching(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         response = await call_next(request)
         path = request.url.path
-        if path.startswith("/api/v1/charts/") and path.rstrip("/").endswith("/dasha"):
+        if path.rstrip("/") == CHAT_PATH or (
+            path.startswith("/api/v1/charts/") and path.rstrip("/").endswith("/dasha")
+        ):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -90,6 +95,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, exc: RequestValidationError
     ) -> Response:
         """Strip submitted inputs/context from 422 errors on birth-profile routes."""
+        if request.url.path.rstrip("/") == CHAT_PATH:
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                content={"code": "invalid_request", "detail": "Invalid chat request"},
+            )
         if request.url.path.startswith(
             ("/api/v1/profiles", "/api/v1/charts", "/api/v1/birthplaces")
         ):

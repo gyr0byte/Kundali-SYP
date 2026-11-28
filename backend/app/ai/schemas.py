@@ -21,6 +21,13 @@ from app.knowledge.provenance import Record
 
 Locale = Literal["en", "ne"]
 ClaimCertainty = Literal["exact", "approximate"]
+ClaimKind = Literal[
+    "chart_fact",
+    "dasha_fact",
+    "general_explanation",
+    "interpretation",
+    "conditional_interpretation",
+]
 Reference = Annotated[
     str, StringConstraints(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_:+.-]+$")
 ]

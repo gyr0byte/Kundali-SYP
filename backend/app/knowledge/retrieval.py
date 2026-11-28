@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from datetime import datetime
 from typing import Annotated, Literal
 from unicodedata import category, normalize
 from uuid import UUID
 
 from pydantic import Field, TypeAdapter, ValidationError
-from sqlalchemy import Select, and_, select
+from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
 
 from app.calc.dasha import DashaLevel, DashaLord
@@ -185,22 +186,45 @@ def _citation(
 
 
 def retrieve(session: Session, search: Search) -> tuple[Match, ...]:
+    return rank_keyword(search, current_matches(session, search))
+
+
+def rank_keyword(search: Search, candidates: Iterable[Match]) -> tuple[Match, ...]:
     terms = _tokens(search.query)
     if not terms:
         return ()
     matches: list[tuple[int, int, str, Match]] = []
-    for chunk, source in session.execute(search_statement(search)):
-        match = match_candidate(chunk, source, search)
-        if match is None:
-            continue
+    for match in candidates:
         identifiers = " ".join(
-            str(value) for key, value in chunk.applicability.items() if key != "topic"
+            str(value)
+            for key, value in match.applicability.model_dump(exclude_none=True).items()
+            if key != "topic"
         )
-        score = len(terms & _tokens(chunk.content + " " + identifiers))
+        score = len(terms & _tokens(match.content + " " + identifiers))
         if score:
-            matches.append((-score, source.tier, chunk.citation_id, match))
+            matches.append((-score, match.tier, match.citation_id, match))
     matches.sort(key=lambda item: item[:3])
     return tuple(item[3] for item in matches[: search.limit])
+
+
+def current_matches(
+    session: Session,
+    search: Search,
+    *,
+    citation_ids: tuple[str, ...] | None = None,
+    max_content_chars: int | None = None,
+) -> Iterator[Match]:
+    if citation_ids == ():
+        return
+    statement = search_statement(search)
+    if citation_ids is not None:
+        statement = statement.where(KnowledgeChunk.citation_id.in_(citation_ids))
+    if max_content_chars is not None:
+        statement = statement.where(func.length(KnowledgeChunk.content) <= max_content_chars)
+    for chunk, source in session.execute(statement.execution_options(populate_existing=True)):
+        match = match_candidate(chunk, source, search)
+        if match is not None:
+            yield match
 
 
 def search_statement(search: Search) -> Select[KnowledgeChunk, KnowledgeSource]:

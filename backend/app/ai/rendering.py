@@ -6,12 +6,19 @@ from enum import StrEnum
 from app.ai.guardrails import passage_is_safe
 from app.ai.schemas import (
     ActiveDashaClaim,
+    ClaimKind,
     FactClaim,
     GeneralExplanation,
     Interpretation,
     Locale,
 )
-from app.knowledge.chunking import NakshatraRule, PadaRule, PlanetInHouse, PlanetInSign
+from app.knowledge.chunking import (
+    Applicability,
+    NakshatraRule,
+    PadaRule,
+    PlanetInHouse,
+    PlanetInSign,
+)
 from app.knowledge.provenance import Digest, sha256
 from app.knowledge.retrieval import Match
 
@@ -25,9 +32,19 @@ class FallbackCode(StrEnum):
     PROVIDER_TIMEOUT = "provider_timeout"
     RESTRICTED_REQUEST = "restricted_request"
     CRISIS_SUPPORT = "crisis_support"
+    SNAPSHOT_REQUIRED = "snapshot_required"
+    DASHA_UNAVAILABLE = "dasha_unavailable"
 
 
 _COPY: dict[FallbackCode, tuple[str, str]] = {
+    FallbackCode.SNAPSHOT_REQUIRED: (
+        "Select a saved Kundali chart to ask about your placements or Dasha.",
+        "आफ्नो ग्रहस्थिति वा दशाबारे सोध्न सुरक्षित गरिएको कुण्डली छान्नुहोस्।",
+    ),
+    FallbackCode.DASHA_UNAVAILABLE: (
+        "This chart has no active Dasha period at the evaluated time.",
+        "गणना गरिएको समयमा यस कुण्डलीको कुनै दशा सक्रिय छैन।",
+    ),
     FallbackCode.UNSUPPORTED_REQUEST: (
         "I couldn’t identify a supported Kundali question. Try asking about one planet, sign, "
         "house, or calculated placement.",
@@ -95,7 +112,9 @@ class PassageApproval:
 @dataclass(frozen=True, slots=True)
 class RenderedClaim:
     text: str
-    conditional: bool = False
+    kind: ClaimKind
+    target: Applicability
+    conditional: bool
     citation_id: str | None = None
     passage: str | None = None
     passage_language: str | None = None
@@ -175,10 +194,14 @@ def render_claim(
         else:
             text = _fact_text(claim.basis, language)
         return RenderedClaim(
-            text,
-            passage.conditional,
-            passage.citation_id,
-            passage.content,
-            passage.language,
+            text=text,
+            kind=claim.kind,
+            target=claim.basis.target if isinstance(claim, Interpretation) else claim.target,
+            conditional=passage.conditional,
+            citation_id=passage.citation_id,
+            passage=passage.content,
+            passage_language=passage.language,
         )
-    return RenderedClaim(_fact_text(claim, language), claim.certainty == "approximate")
+    return RenderedClaim(
+        _fact_text(claim, language), claim.kind, claim.target, claim.certainty == "approximate"
+    )
