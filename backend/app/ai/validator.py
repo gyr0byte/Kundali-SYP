@@ -291,20 +291,38 @@ def _validate_claim(
     return None
 
 
-def validate_reading(payload: object, evidence: GroundingEvidence) -> GroundingResult:
-    """Return validated selections or the first safe diagnostic, never partial output."""
+class ResponseDecodeError(ValueError):
+    def __init__(self, code: GroundingCode) -> None:
+        super().__init__(code.value)
+        self.code = code
+
+
+def decode_response(payload: object) -> tuple[bytes, object]:
+    """Decode bounded generated JSON with the same rules for all provider responses."""
     if not isinstance(payload, (str, bytes)):
-        return GroundingResult(code=GroundingCode.MALFORMED_RESPONSE)
+        raise ResponseDecodeError(GroundingCode.MALFORMED_RESPONSE)
     if len(payload) > MAX_RESPONSE_BYTES:
-        return GroundingResult(code=GroundingCode.RESPONSE_TOO_LARGE)
+        raise ResponseDecodeError(GroundingCode.RESPONSE_TOO_LARGE)
     try:
         raw = payload.encode("utf-8") if isinstance(payload, str) else payload
-        if len(raw) > MAX_RESPONSE_BYTES:
-            return GroundingResult(code=GroundingCode.RESPONSE_TOO_LARGE)
-        json.loads(
-            raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_invalid_constant
-        )
+        if len(raw) <= MAX_RESPONSE_BYTES:
+            return raw, json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=_unique_object,
+                parse_constant=_invalid_constant,
+            )
+    except (ValueError, RecursionError):
+        raise ResponseDecodeError(GroundingCode.MALFORMED_RESPONSE) from None
+    raise ResponseDecodeError(GroundingCode.RESPONSE_TOO_LARGE)
+
+
+def validate_reading(payload: object, evidence: GroundingEvidence) -> GroundingResult:
+    """Return validated selections or the first safe diagnostic, never partial output."""
+    try:
+        raw, _ = decode_response(payload)
         reading = Reading.model_validate_json(raw, strict=True)
+    except ResponseDecodeError as exc:
+        return GroundingResult(code=exc.code)
     except (ValueError, RecursionError):
         return GroundingResult(code=GroundingCode.MALFORMED_RESPONSE)
     try:

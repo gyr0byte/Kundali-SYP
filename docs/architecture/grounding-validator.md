@@ -71,7 +71,8 @@ reviewed passage has applicable metadata. It cannot establish that a passage
 semantically entails arbitrary prose, that an astrological interpretation is
 true, or that a translation preserves its meaning. The schema therefore has
 no model-authored text fields for claims, summaries, caveats or abstentions.
-A future renderer must use server-authored English or Nepali templates and
-trusted passages. A retrieved passage may be in a different language from
-the reading locale. This work adds no rendering, generation, translation,
-correction calls or knowledge publication.
+The [trusted renderer and generation orchestrator](safety-and-generation.md)
+use server-authored English or Nepali templates and separately approved
+passages. A retrieved passage may be in a different language from the reading
+locale. The grounding validator itself performs no rendering, generation,
+translation, correction calls or knowledge publication.
