@@ -306,8 +306,8 @@ def test_alembic_discovery_and_offline_sql_generation(monkeypatch: pytest.Monkey
 
     script_dir = ScriptDirectory.from_config(cfg)
     heads = script_dir.get_heads()
-    assert heads == ["0006_knowledge_corpus"]
-    assert script_dir.get_revision(heads[0]).down_revision == "0005_resolved_bs_profiles"
+    assert heads == ["0007_knowledge_embeddings"]
+    assert script_dir.get_revision(heads[0]).down_revision == "0006_knowledge_corpus"
     assert (
         script_dir.get_revision("0003_enable_pgvector").down_revision == "0002_birth_profiles_table"
     )
@@ -332,18 +332,21 @@ def test_alembic_discovery_and_offline_sql_generation(monkeypatch: pytest.Monkey
     assert "CONSTRAINT uq_chart_snapshots_result UNIQUE" in upgrade_sql
     assert "CREATE TABLE knowledge_sources" in upgrade_sql
     assert "CREATE TABLE knowledge_chunks" in upgrade_sql
+    assert "CREATE TABLE embedding_builds" in upgrade_sql
+    assert "embedding VECTOR(384) NOT NULL" in upgrade_sql
     assert "uq_knowledge_enabled_source" in upgrade_sql
 
     downgrade_buf = io.StringIO()
     cfg_down = Config(str(alembic_ini), stdout=downgrade_buf)
     cfg_down.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
     assert "CHECK (input_calendar = 'BS' OR date_ad_enc IS NOT NULL)" in upgrade_sql
-    command.downgrade(cfg_down, "0006_knowledge_corpus:0001_initial_auth_tables", sql=True)
+    command.downgrade(cfg_down, "0007_knowledge_embeddings:0001_initial_auth_tables", sql=True)
     downgrade_sql = downgrade_buf.getvalue()
     assert "DROP INDEX" in downgrade_sql
     assert "DROP TABLE birth_profiles" in downgrade_sql
     assert "DROP TABLE chart_snapshots" in downgrade_sql
     assert "DROP TABLE knowledge_chunks" in downgrade_sql
+    assert "DROP TABLE knowledge_chunk_vectors" in downgrade_sql
     assert "DROP EXTENSION" not in downgrade_sql
 
 

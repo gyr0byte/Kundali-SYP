@@ -103,7 +103,8 @@ def test_checker_reports_known_statuses(checker: ModuleType) -> None:
 @pytest.mark.parametrize(
     ("revision", "reported", "exit_code"),
     [
-        ("0006_knowledge_corpus", "0006_knowledge_corpus", 0),
+        ("0007_knowledge_embeddings", "0007_knowledge_embeddings", 0),
+        ("0006_knowledge_corpus", "0006_knowledge_corpus", 1),
         ("0005_resolved_bs_profiles", "0005_resolved_bs_profiles", 1),
         ("unrecognized_revision", "unknown", 1),
     ],

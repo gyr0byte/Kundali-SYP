@@ -3,6 +3,7 @@
 from app.db.models.astrologer_profile import AstrologerProfile, AstrologerStatus
 from app.db.models.audit_log import AuditLog
 from app.db.models.chart import ChartSnapshot
+from app.db.models.embedding import EmbeddingBuild, KnowledgeChunkVector
 from app.db.models.knowledge import KnowledgeChunk, KnowledgeSource
 from app.db.models.password_reset_token import PasswordResetToken
 from app.db.models.profile import BirthProfile, InputCalendar, TimeCertainty
@@ -15,8 +16,10 @@ __all__ = [
     "AuditLog",
     "BirthProfile",
     "ChartSnapshot",
+    "EmbeddingBuild",
     "InputCalendar",
     "KnowledgeChunk",
+    "KnowledgeChunkVector",
     "KnowledgeSource",
     "PasswordResetToken",
     "RefreshToken",

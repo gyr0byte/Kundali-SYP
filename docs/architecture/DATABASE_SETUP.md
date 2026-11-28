@@ -66,9 +66,10 @@ Only run live commands when explicitly authorized. Verify branch and database in
 
 Exit codes are `0` for ready, `1` for reachable with incomplete schema or extension, `2` for invalid configuration, and `3` for connectivity or inspection failure. The checker needs no JWT or Fernet key.
 
-Readiness requires revision `0006_knowledge_corpus` and installed pgvector.
+Readiness requires revision `0007_knowledge_embeddings` and installed pgvector.
 The checker reports recognized earlier revisions by name. For example,
-`0005_resolved_bs_profiles` is recognized and returns exit code `1`.
+`0006_knowledge_corpus` and `0005_resolved_bs_profiles` are recognized and
+return exit code `1`.
 
 To apply migrations, run the Alembic command above from `backend` without `--sql`, then rerun the checker. Revision `0003_enable_pgvector` creates the PostgreSQL extension `vector` if absent. Availability and permission to install are separate. Downgrade retains the extension because it may predate the migration or be shared.
 

@@ -80,6 +80,7 @@ class KnowledgeChunk(Base):
             name="ck_knowledge_chunk_review",
         ),
         Index("ix_knowledge_chunks_topic_source", "topic", "source_id", "source_version"),
+        Index("uq_knowledge_chunk_checksum", "citation_id", "content_sha256", unique=True),
     )
 
     citation_id: Mapped[str] = mapped_column(String(200), primary_key=True)

@@ -33,7 +33,9 @@ Revision `0006_knowledge_corpus` follows `0005_resolved_bs_profiles`. It
 adds `knowledge_sources` keyed by source ID and version and
 `knowledge_chunks` keyed by `source@version/key@revision`. PostgreSQL
 uses JSONB for provenance, rights, locators and validated applicability.
-There is no embedding column. The partial unique index permits a single
+The corpus tables contain no embedding column. The separate build and
+vector tables are described in [Embedding builds](knowledge-embeddings.md).
+The partial unique index permits a single
 enabled release per source lineage. The foreign keys require existing
 source versions, and revision supersession links to the prior release.
 Downgrade drops the two corpus tables and their contents.

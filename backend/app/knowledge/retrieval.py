@@ -119,7 +119,7 @@ def _applicable(rule: Applicability, search: Search) -> bool | None:
     return None
 
 
-def _eligible_statement(*, current: bool) -> Select[KnowledgeChunk, KnowledgeSource]:
+def eligible_statement(*, current: bool) -> Select[KnowledgeChunk, KnowledgeSource]:
     predicates = [
         KnowledgeSource.collection == "production",
         KnowledgeSource.rights_status.in_(CLEARED),
@@ -177,46 +177,56 @@ def retrieve(session: Session, search: Search) -> tuple[Match, ...]:
     terms = _tokens(search.query)
     if not terms:
         return ()
-    statement = _eligible_statement(current=True).where(
-        KnowledgeChunk.topic.in_(search.topics),
-        KnowledgeChunk.language.in_(search.languages),
-    )
     matches: list[tuple[int, int, str, Match]] = []
-    for chunk, source in session.execute(statement):
-        try:
-            rule = _RULE.validate_python(chunk.applicability)
-        except ValidationError:
-            continue
-        conditional = _applicable(rule, search)
-        if conditional is None or (citation := _citation(chunk, source, rule)) is None:
+    for chunk, source in session.execute(search_statement(search)):
+        match = match_candidate(chunk, source, search)
+        if match is None:
             continue
         identifiers = " ".join(
             str(value) for key, value in chunk.applicability.items() if key != "topic"
         )
         score = len(terms & _tokens(chunk.content + " " + identifiers))
         if score:
-            matches.append(
-                (
-                    -score,
-                    source.tier,
-                    chunk.citation_id,
-                    Match(**citation.model_dump(), conditional=conditional),
-                )
-            )
+            matches.append((-score, source.tier, chunk.citation_id, match))
     matches.sort(key=lambda item: item[:3])
     return tuple(item[3] for item in matches[: search.limit])
 
 
-def resolve_citation(session: Session, citation_id: str) -> Citation | None:
-    """Resolve an approved historical citation while the release rights still permit it."""
-    row = session.execute(
-        _eligible_statement(current=False).where(KnowledgeChunk.citation_id == citation_id)
-    ).one_or_none()
-    if row is None:
+def search_statement(search: Search) -> Select[KnowledgeChunk, KnowledgeSource]:
+    return eligible_statement(current=True).where(
+        KnowledgeChunk.topic.in_(search.topics),
+        KnowledgeChunk.language.in_(search.languages),
+    )
+
+
+def match_candidate(chunk: KnowledgeChunk, source: KnowledgeSource, search: Search) -> Match | None:
+    try:
+        rule = _RULE.validate_python(chunk.applicability)
+    except ValidationError:
         return None
-    chunk, source = row
+    conditional = _applicable(rule, search)
+    if conditional is None:
+        return None
+    citation = _citation(chunk, source, rule)
+    if citation is None:
+        return None
+    return Match(**citation.model_dump(), conditional=conditional)
+
+
+def validated_citation(chunk: KnowledgeChunk, source: KnowledgeSource) -> Citation | None:
     try:
         rule = _RULE.validate_python(chunk.applicability)
     except ValidationError:
         return None
     return _citation(chunk, source, rule)
+
+
+def resolve_citation(session: Session, citation_id: str) -> Citation | None:
+    """Resolve an approved historical citation while the release rights still permit it."""
+    row = session.execute(
+        eligible_statement(current=False).where(KnowledgeChunk.citation_id == citation_id)
+    ).one_or_none()
+    if row is None:
+        return None
+    chunk, source = row
+    return validated_citation(chunk, source)

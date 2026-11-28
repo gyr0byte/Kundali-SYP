@@ -31,7 +31,11 @@ def test_database_migration_matches_orm():
             migration.upgrade()
             schema = MetaData()
             KnowledgeSource.__table__.to_metadata(schema)
-            KnowledgeChunk.__table__.to_metadata(schema)
+            chunks = KnowledgeChunk.__table__.to_metadata(schema)
+            # This check targets revision 0006. Revision 0007 adds the checksum index.
+            chunks.indexes = {
+                index for index in chunks.indexes if index.name != "uq_knowledge_chunk_checksum"
+            }
             assert compare_metadata(context, schema) == []
             migration.downgrade()
 

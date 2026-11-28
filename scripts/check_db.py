@@ -16,7 +16,7 @@ from app.db.connection import (  # noqa: E402
     postgres_url,
 )
 
-HEAD = "0006_knowledge_corpus"
+HEAD = "0007_knowledge_embeddings"
 
 
 def inspect_database(engine: Engine) -> tuple[str, str]:
@@ -38,6 +38,7 @@ def inspect_database(engine: Engine) -> tuple[str, str]:
                 "0003_enable_pgvector",
                 "0004_chart_snapshots",
                 "0005_resolved_bs_profiles",
+                "0006_knowledge_corpus",
                 HEAD,
             }
             detected = revisions.all()

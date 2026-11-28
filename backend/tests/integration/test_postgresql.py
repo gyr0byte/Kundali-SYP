@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from math import hypot
 from pathlib import Path
 from queue import Queue
 from threading import Event
@@ -20,12 +21,16 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-from psycopg.errors import CheckViolation, UniqueViolation
+from psycopg.errors import CheckViolation, ForeignKeyViolation, UniqueViolation
 from sqlalchemy import event, insert, inspect, select, text, update
 from sqlalchemy.engine import URL, Connection, Engine, Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.ai import retrieval as semantic_retrieval
+from app.ai.embeddings import DIMENSION, EmbeddingQuery, SyntheticEmbeddingProvider
+from app.ai.retrieval import order_by_cosine, vector_candidates
+from app.ai.vector_store import BuildCompatibilityError, embed_chunk, load_build, register_build
 from app.api.schemas.profile import BirthProfileCreate, BirthProfileUpdate
 from app.calc.facts import ChartSettings
 from app.core.clock import FrozenClock
@@ -43,6 +48,7 @@ from app.db.models import (
     ChartSnapshot,
     InputCalendar,
     KnowledgeChunk,
+    KnowledgeChunkVector,
     KnowledgeSource,
     RefreshToken,
     TimeCertainty,
@@ -135,8 +141,13 @@ def migrated_database() -> Iterator[MigratedDatabase]:
             cfg.attributes["connection"] = connection
             command.upgrade(cfg, "0004_chart_snapshots")
             legacy = _seed_legacy_profiles(connection)
+            command.upgrade(cfg, "0006_knowledge_corpus")
+            with Session(bind=connection) as session:
+                manifest = parse_manifest(canonical_bytes(payload("test-legacy-knowledge", "test")))
+                import_manifest(session, manifest, allow_test=True)
+            knowledge_before = _legacy_knowledge(connection)
             command.upgrade(cfg, "head")
-        yield MigratedDatabase(engine, legacy)
+        yield MigratedDatabase(engine, legacy, knowledge_before)
     except Exception:
         pytest.fail(
             "Disposable PostgreSQL setup failed. Check the target and permissions privately.",
@@ -160,6 +171,25 @@ class LegacyProfiles:
 class MigratedDatabase:
     engine: Engine
     legacy: LegacyProfiles
+    knowledge_before: tuple[list[Row[Any]], list[Row[Any]]]
+
+
+def _legacy_knowledge(connection: Connection) -> tuple[list[Row[Any]], list[Row[Any]]]:
+    source_id = "test-legacy-knowledge"
+    return (
+        list(
+            connection.execute(
+                select(KnowledgeSource.__table__).where(KnowledgeSource.source_id == source_id)
+            )
+        ),
+        list(
+            connection.execute(
+                select(KnowledgeChunk.__table__)
+                .where(KnowledgeChunk.source_id == source_id)
+                .order_by(KnowledgeChunk.citation_id)
+            )
+        ),
+    )
 
 
 def _migration_profile_rows(
@@ -292,7 +322,7 @@ def test_migrations_match_models_and_install_vector(migrated_engine: Engine) -> 
     with migrated_engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM public.alembic_version"))
-            == "0006_knowledge_corpus"
+            == "0007_knowledge_embeddings"
         )
         assert connection.scalar(
             text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")
@@ -302,6 +332,89 @@ def test_migrations_match_models_and_install_vector(migrated_engine: Engine) -> 
         )
         migration = MigrationContext.configure(connection, opts={"compare_server_default": True})
         assert compare_metadata(migration, Base.metadata) == []
+
+
+def test_postgres_pgvector_migration_preserves_corpus(migrated_database: MigratedDatabase) -> None:
+    sources, chunks = migrated_database.knowledge_before
+    assert len(sources) == 1 and len(chunks) == 3
+    with migrated_database.engine.connect() as connection:
+        assert _legacy_knowledge(connection) == migrated_database.knowledge_before
+        assert (
+            connection.scalar(
+                text("""
+            SELECT format_type(atttypid, atttypmod)
+            FROM pg_attribute
+            WHERE attrelid = 'public.knowledge_chunk_vectors'::regclass AND attname = 'embedding'
+        """)
+            )
+            == "vector(384)"
+        )
+
+
+def test_postgres_pgvector_exact_ranking_in_isolated_test_build(db_session: Session) -> None:
+    class KnownVectors(SyntheticEmbeddingProvider):
+        def embed_document(self, text: str) -> tuple[float, ...]:
+            return (
+                (1.0, 0.0, *(0.0,) * (DIMENSION - 2))
+                if "fifth" in text
+                else (0.0, 1.0, *(0.0,) * (DIMENSION - 2))
+            )
+
+    provider = KnownVectors()
+    build = register_build(db_session, provider.config, purpose="test", generation=701)
+    other = register_build(db_session, provider.config, purpose="test", generation=702)
+    import_manifest(
+        db_session,
+        parse_manifest(canonical_bytes(payload("test-pgvector-ranking", "test"))),
+        allow_test=True,
+    )
+    prefix = "test-pgvector-ranking@1/"
+    for key in ("moon-general", "moon-fifth", "venus-period"):
+        assert embed_chunk(db_session, build, provider, prefix + key + "@1", purpose="test")
+    assert not embed_chunk(db_session, build, provider, prefix + "moon-fifth@1", purpose="test")
+    assert embed_chunk(db_session, other, provider, prefix + "moon-general@1", purpose="test")
+    with pytest.raises(IntegrityError) as failure, db_session.begin():
+        db_session.add(
+            KnowledgeChunkVector(
+                build_id=other,
+                citation_id=prefix + "moon-fifth@1",
+                content_sha256="0" * 64,
+                embedding=[1.0] + [0.0] * (DIMENSION - 1),
+            )
+        )
+    assert isinstance(failure.value.orig, ForeignKeyViolation)
+    tie_source = "test-pgvector-ranking-tie"
+    import_manifest(
+        db_session,
+        parse_manifest(canonical_bytes(payload(tie_source, "test"))),
+        allow_test=True,
+    )
+    tie_id = tie_source + "@1/moon-fifth@1"
+    assert embed_chunk(db_session, build, provider, tie_id, purpose="test")
+    candidates = (
+        select(KnowledgeChunk, KnowledgeSource)
+        .join(KnowledgeSource)
+        .where(
+            KnowledgeSource.collection == "test",
+            KnowledgeChunk.topic.in_(("planet_general", "planet_in_house")),
+        )
+    )
+    query = (3.0, 1.0) + (0.0,) * (DIMENSION - 2)
+    distance = KnowledgeChunkVector.embedding.cosine_distance(list(query))
+    ranked = order_by_cosine(vector_candidates(candidates, build), query).add_columns(distance)
+    actual = [(chunk.citation_id, value) for chunk, _, value in db_session.execute(ranked)]
+    expected = {
+        prefix + "moon-fifth@1": 1 - 3 / hypot(3, 1),
+        tie_id: 1 - 3 / hypot(3, 1),
+        prefix + "moon-general@1": 1 - 1 / hypot(3, 1),
+    }
+    assert [citation for citation, _ in actual] == sorted(
+        expected, key=lambda citation: (expected[citation], citation)
+    )
+    assert [value for _, value in actual] == pytest.approx(
+        [expected[citation] for citation, _ in actual],
+        abs=1e-6,
+    )
 
 
 def test_encrypted_profile_crud_and_ownership(
@@ -394,6 +507,139 @@ def _run_blocked_race[T](
             result = first(db)
         pending.result(timeout=25)
     return result
+
+
+def test_postgres_pgvector_duplicate_write_is_idempotent(migrated_engine: Engine) -> None:
+    provider = SyntheticEmbeddingProvider()
+    citation_id = "test-vector-race@1/moon-fifth@1"
+    with Session(migrated_engine) as session:
+        build_id = register_build(session, provider.config, purpose="test", generation=703)
+        manifest = parse_manifest(canonical_bytes(payload("test-vector-race", "test")))
+        import_manifest(session, manifest, allow_test=True)
+
+    rolled_back_id = "test-vector-race@1/moon-general@1"
+    with migrated_engine.connect() as connection, connection.begin() as transaction:
+        with Session(bind=connection) as writer:
+            assert embed_chunk(writer, build_id, provider, rolled_back_id, purpose="test")
+        transaction.rollback()
+    with Session(migrated_engine) as session:
+        assert session.get(KnowledgeChunkVector, (build_id, rolled_back_id)) is None
+
+    def write(session: Session, *, expected: bool) -> None:
+        # The service owns its inner transaction. The harness controls the outer commit.
+        with Session(bind=session.connection()) as writer:
+            assert embed_chunk(writer, build_id, provider, citation_id, purpose="test") == expected
+
+    _run_blocked_race(
+        migrated_engine,
+        lambda session: write(session, expected=True),
+        lambda session: session.commit(),
+        lambda session: write(session, expected=False),
+    )
+    with Session(migrated_engine) as session:
+        rows = list(
+            session.scalars(
+                select(KnowledgeChunkVector).where(
+                    KnowledgeChunkVector.build_id == build_id,
+                    KnowledgeChunkVector.citation_id == citation_id,
+                )
+            )
+        )
+        assert len(rows) == 1
+        assert len(rows[0].embedding) == DIMENSION
+
+
+def test_postgres_pgvector_semantic_filters_and_conditionality(
+    migrated_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FixedQuery(SyntheticEmbeddingProvider):
+        def embed_query(self, query: EmbeddingQuery) -> tuple[float, ...]:
+            return (1.0,) + (0.0,) * (DIMENSION - 1)
+
+    provider = FixedQuery()
+    intent = EmbeddingQuery.model_validate(
+        {
+            "targets": [{"topic": "planet_in_house", "planet": "Moon", "house": 5}],
+        }
+    )
+    search = Search(
+        query="opaque unrelated wording",
+        topics=("planet_in_house",),
+        languages=("en",),
+        limit=1,
+        placements=(
+            PlacementEvidence(planet="Moon", house=5, certainty="approximate"),
+            PlacementEvidence(planet="Venus", house=4, certainty="exact"),
+        ),
+    )
+    # Serving-shaped stand-ins and vectors are all rolled back. No production build is created.
+    with migrated_engine.connect() as connection, connection.begin() as transaction:
+        with Session(bind=connection) as session:
+            build_id = register_build(session, provider.config, purpose="test", generation=704)
+            for state in ("eligible", "disabled", "withdrawn", "pending", "hard-negative"):
+                source_id = f"fixture-vector-{state}"
+                data = payload(source_id)
+                data["source"]["rights"]["permitted_uses"].append("third_party_processing")
+                if state == "hard-negative":
+                    data["chunks"][1]["applicability"]["planet"] = "Venus"
+                import_manifest(session, parse_manifest(canonical_bytes(data)))
+            for state in ("eligible", "disabled", "withdrawn", "pending", "hard-negative"):
+                source_id = f"fixture-vector-{state}"
+                source = session.get(KnowledgeSource, (source_id, 1))
+                assert source is not None
+                source.enabled = state not in {"disabled", "withdrawn"}
+                source.publication_review = "rolled-back test only"
+                if state == "withdrawn":
+                    source.rights_status = "excluded"
+                chunk = session.get(KnowledgeChunk, f"{source_id}@1/moon-fifth@1")
+                assert chunk is not None
+                if state != "pending":
+                    chunk.editorial_status = "approved"
+                    chunk.editorial_review = "rolled-back test only"
+                # Ineligible entries have closer vectors and must never win this top-1 lookup.
+                pair = [0.0, 1.0] if state == "eligible" else [1.0, 0.0]
+                session.add(
+                    KnowledgeChunkVector(
+                        build_id=build_id,
+                        citation_id=chunk.citation_id,
+                        content_sha256=chunk.content_sha256,
+                        embedding=pair + [0.0] * (DIMENSION - 2),
+                    )
+                )
+            session.flush()
+            assert retrieve(session, search) == ()
+            with pytest.raises(BuildCompatibilityError):
+                semantic_retrieval.retrieve_semantic(
+                    session,
+                    search,
+                    intent,
+                    build_id=build_id,
+                    provider=provider,
+                )
+            # Bypass only the test-build gate, after checking it. Exercise actual serving SQL.
+            monkeypatch.setattr(
+                semantic_retrieval,
+                "load_build",
+                lambda db, identity, config, *, purpose: load_build(
+                    db,
+                    identity,
+                    config,
+                    purpose="test",
+                ),
+            )
+            result = semantic_retrieval.retrieve_semantic(
+                session,
+                search,
+                intent,
+                build_id=build_id,
+                provider=provider,
+            )
+            assert result.mode == "semantic"
+            (match,) = result.matches
+            assert match.citation_id == "fixture-vector-eligible@1/moon-fifth@1"
+            assert match.conditional
+            transaction.rollback()
 
 
 def test_postgres_knowledge_ingestion_atomicity_and_revision_conflicts(db_session: Session) -> None:
