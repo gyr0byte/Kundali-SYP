@@ -13,7 +13,12 @@ from pydantic import ValidationError
 
 from app.ai.guardrails import SafetyAction, SafetyDecision, assess_input, passage_is_safe
 from app.ai.intent import AuthorizedEvidence, project_authorized_evidence, resolve_intent
-from app.ai.llm_adapter import ClaimChoice, Correction, GenerationProvider, GenerationRequest
+from app.ai.llm_adapter import (
+    MALFORMED_SELECTION_CORRECTION,
+    ClaimChoice,
+    GenerationProvider,
+    GenerationRequest,
+)
 from app.ai.rendering import (
     FallbackCode,
     PassageApproval,
@@ -68,6 +73,7 @@ class GenerationResult:
     message: str | None = None
     failure: GenerationCode | None = None
     grounding_code: GroundingCode | None = None
+    selected_options: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,7 +339,7 @@ async def generate_reading(
     if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 30:
         raise ValueError("Generation timeout must be between zero and thirty seconds")
     deadline = asyncio.get_running_loop().time() + timeout_seconds
-    request = GenerationRequest(language, _provider_choices(options))
+    request = GenerationRequest(language, _provider_choices(options), deadline=deadline)
     for attempt in range(2):
         if asyncio.get_running_loop().time() >= deadline:
             return fallback(FallbackCode.PROVIDER_TIMEOUT)
@@ -346,10 +352,7 @@ async def generate_reading(
             if attempt == 0 and selected == GenerationCode.MALFORMED_SELECTION:
                 request = replace(
                     request,
-                    correction=Correction(
-                        "malformed_selection",
-                        "Return a JSON object with a choices array of distinct offered integers.",
-                    ),
+                    correction=MALFORMED_SELECTION_CORRECTION,
                 )
                 continue
             return fallback(FallbackCode.GROUNDING_FAILED, selected)
@@ -372,5 +375,7 @@ async def generate_reading(
             if item is None:
                 return fallback(FallbackCode.RESTRICTED_REQUEST, GenerationCode.UNSAFE_PASSAGE)
             rendered.append(item)
-        return GenerationResult(language, policy, attempts, tuple(rendered), disclaimer)
+        return GenerationResult(
+            language, policy, attempts, tuple(rendered), disclaimer, selected_options=selected
+        )
     raise AssertionError("Generation attempts exhausted")

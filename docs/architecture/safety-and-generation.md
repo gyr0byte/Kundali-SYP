@@ -78,5 +78,6 @@ safe. The human approval boundary, intent whitelist, numeric selection
 envelope and trusted rendering remain necessary. Validation establishes
 structured consistency and applicability, without proving semantic entailment
 or translation quality. The templates retain some canonical astrology terms.
-This change provides no live adapter, API route, production display approvals,
-publication, translation or frontend integration.
+The [Gemini generation pilot](gemini-generation-pilot.md) exercises this
+boundary with a pinned synthetic fixture. There is no production generation
+route, display approval, publication, translation or frontend integration.

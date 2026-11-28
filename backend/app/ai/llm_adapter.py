@@ -26,6 +26,12 @@ class Correction:
     guidance: Literal["Return a JSON object with a choices array of distinct offered integers."]
 
 
+MALFORMED_SELECTION_CORRECTION = Correction(
+    "malformed_selection",
+    "Return a JSON object with a choices array of distinct offered integers.",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class GenerationRequest:
     """Contains only local choice numbers and allowlisted concepts."""
@@ -33,6 +39,7 @@ class GenerationRequest:
     language: Locale
     choices: tuple[ClaimChoice, ...]
     correction: Correction | None = None
+    deadline: float | None = None
 
 
 class GenerationProvider(Protocol):

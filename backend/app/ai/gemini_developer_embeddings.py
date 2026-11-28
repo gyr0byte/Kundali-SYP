@@ -1,7 +1,6 @@
 """Gemini Developer API transport restricted to reviewed evaluation inputs."""
 
 import json
-import re
 from collections.abc import Callable
 from time import monotonic
 from typing import Literal
@@ -17,6 +16,7 @@ from app.ai.embeddings import (
     Vector,
     normalize_vector,
 )
+from app.ai.gemini_developer_auth import developer_api_key
 from app.ai.gemini_embeddings import MAX_ATTEMPTS, AttemptOutcome
 
 _MODEL = "gemini-embedding-001"
@@ -69,10 +69,8 @@ class GeminiDeveloperEmbeddings:
         task: Literal["RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT"],
     ) -> Vector:
         try:
-            key = self._api_key()
-            if not re.fullmatch(r"(?:AIza[A-Za-z0-9_-]{35}|AQ\.[A-Za-z0-9_-]{17,253})", key):
-                raise ValueError
-        except Exception:
+            key = developer_api_key(self._api_key)
+        except ValueError:
             raise EmbeddingUnavailable(
                 "Gemini Developer API authentication is unavailable"
             ) from None
