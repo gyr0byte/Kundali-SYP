@@ -16,7 +16,7 @@ from app.db.connection import (  # noqa: E402
     postgres_url,
 )
 
-HEAD = "0005_resolved_bs_profiles"
+HEAD = "0006_knowledge_corpus"
 
 
 def inspect_database(engine: Engine) -> tuple[str, str]:
@@ -37,6 +37,7 @@ def inspect_database(engine: Engine) -> tuple[str, str]:
                 "0002_birth_profiles_table",
                 "0003_enable_pgvector",
                 "0004_chart_snapshots",
+                "0005_resolved_bs_profiles",
                 HEAD,
             }
             detected = revisions.all()

@@ -20,8 +20,8 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-from psycopg.errors import CheckViolation
-from sqlalchemy import insert, inspect, select, text, update
+from psycopg.errors import CheckViolation, UniqueViolation
+from sqlalchemy import event, insert, inspect, select, text, update
 from sqlalchemy.engine import URL, Connection, Engine, Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -42,10 +42,15 @@ from app.db.models import (
     BirthProfile,
     ChartSnapshot,
     InputCalendar,
+    KnowledgeChunk,
+    KnowledgeSource,
     RefreshToken,
     TimeCertainty,
     User,
 )
+from app.knowledge.ingestion import ManifestConflict, import_manifest, parse_manifest
+from app.knowledge.provenance import canonical_bytes
+from app.knowledge.retrieval import PlacementEvidence, Search, resolve_citation, retrieve
 from app.services import auth_service, user_service
 from app.services.account_locks import lock_administration, lock_user
 from app.services.astrologer_service import approve_astrologer
@@ -57,6 +62,7 @@ from app.services.chart_service import (
     persist_chart_snapshot,
 )
 from app.services.profile_service import create_profile, delete_profile, update_profile
+from tests.knowledge_fixtures import payload
 
 BACKEND = Path(__file__).resolve().parents[2]
 
@@ -286,7 +292,7 @@ def test_migrations_match_models_and_install_vector(migrated_engine: Engine) -> 
     with migrated_engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM public.alembic_version"))
-            == "0005_resolved_bs_profiles"
+            == "0006_knowledge_corpus"
         )
         assert connection.scalar(
             text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")
@@ -388,6 +394,165 @@ def _run_blocked_race[T](
             result = first(db)
         pending.result(timeout=25)
     return result
+
+
+def test_postgres_knowledge_ingestion_atomicity_and_revision_conflicts(db_session: Session) -> None:
+    source_id = "fixture-knowledge-import"
+    manifest = parse_manifest(canonical_bytes(payload(source_id)))
+
+    def reject_chunk(session: Session, *args: object) -> None:
+        for row in session.new:
+            if isinstance(row, KnowledgeChunk):
+                row.editorial_status = "invalid"
+
+    event.listen(db_session, "before_flush", reject_chunk)
+    try:
+        with pytest.raises(IntegrityError) as failure:
+            import_manifest(db_session, manifest)
+        assert isinstance(failure.value.orig, CheckViolation)
+        assert failure.value.orig.diag.constraint_name == "ck_knowledge_chunk_review"
+    finally:
+        event.remove(db_session, "before_flush", reject_chunk)
+    assert db_session.get(KnowledgeSource, (source_id, 1)) is None
+    assert (
+        db_session.scalar(select(KnowledgeChunk).where(KnowledgeChunk.source_id == source_id))
+        is None
+    )
+    db_session.rollback()
+    assert import_manifest(db_session, manifest).inserted
+    assert not import_manifest(db_session, manifest).inserted
+    for version in (1, 2):
+        changed = parse_manifest(
+            canonical_bytes(payload(source_id, version=version, text="Changed."))
+        )
+        with pytest.raises(ManifestConflict):
+            import_manifest(db_session, changed)
+    assert db_session.get(KnowledgeSource, (source_id, 2)) is None
+    chunks = list(
+        db_session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.source_id == source_id))
+    )
+    assert len(chunks) == len(manifest.chunks)
+    assert all(chunk.editorial_status == "pending" for chunk in chunks)
+
+
+def test_postgres_knowledge_competing_publications(migrated_engine: Engine) -> None:
+    source_id = "fixture-knowledge-race"
+    with Session(migrated_engine) as session:
+        for version in (1, 2):
+            import_manifest(
+                session, parse_manifest(canonical_bytes(payload(source_id, version=version)))
+            )
+
+    def enable(session: Session, version: int) -> None:
+        session.execute(
+            update(KnowledgeSource)
+            .where(
+                KnowledgeSource.source_id == source_id,
+                KnowledgeSource.version == version,
+            )
+            .values(enabled=True, publication_review="disposable synthetic race")
+        )
+
+    def compete(session: Session) -> None:
+        with pytest.raises(IntegrityError) as failure:
+            enable(session, 2)
+        assert isinstance(failure.value.orig, UniqueViolation)
+        assert failure.value.orig.diag.constraint_name == "uq_knowledge_enabled_source"
+        session.rollback()
+
+    _run_blocked_race(migrated_engine, lambda db: enable(db, 1), lambda db: db.commit(), compete)
+    with Session(migrated_engine) as session:
+        assert list(
+            session.scalars(
+                select(KnowledgeSource.version).where(
+                    KnowledgeSource.source_id == source_id,
+                    KnowledgeSource.enabled,
+                )
+            )
+        ) == [1]
+
+
+def test_postgres_knowledge_retrieval_and_citation_gates(db_session: Session) -> None:
+    source_id = "fixture-knowledge-serving"
+    test_id = "test-knowledge-serving"
+    uncleared = payload("fixture-knowledge-uncleared")
+    uncleared["source"]["rights"].update(status="unresolved", permitted_uses=[])
+    for data in (payload(source_id), payload(test_id, "test"), uncleared):
+        import_manifest(db_session, parse_manifest(canonical_bytes(data)), allow_test=True)
+    query = Search(
+        query="Moon fifth attention",
+        topics=("planet_in_house",),
+        languages=("en",),
+        placements=(PlacementEvidence(planet="Moon", house=5, certainty="approximate"),),
+    )
+    assert retrieve(db_session, query) == ()
+    db_session.rollback()
+
+    def approve(source: str) -> None:
+        db_session.execute(
+            update(KnowledgeChunk)
+            .where(
+                KnowledgeChunk.source_id == source,
+            )
+            .values(editorial_status="approved", editorial_review="disposable synthetic approval")
+        )
+
+    with db_session.begin():
+        for excluded in (test_id, "fixture-knowledge-uncleared"):
+            approve(excluded)
+            with pytest.raises(IntegrityError) as failure, db_session.begin_nested():
+                db_session.execute(
+                    update(KnowledgeSource)
+                    .where(
+                        KnowledgeSource.source_id == excluded,
+                    )
+                    .values(enabled=True, publication_review="disposable synthetic approval")
+                )
+            assert isinstance(failure.value.orig, CheckViolation)
+            assert failure.value.orig.diag.constraint_name == "ck_knowledge_source_publication"
+        db_session.execute(
+            update(KnowledgeSource)
+            .where(
+                KnowledgeSource.source_id == source_id,
+            )
+            .values(enabled=True, publication_review="disposable synthetic approval")
+        )
+    assert retrieve(db_session, query) == ()  # Source enabled, chunks still pending.
+    db_session.rollback()
+    with db_session.begin():
+        approve(source_id)
+    (match,) = retrieve(db_session, query)
+    assert match.source_id == source_id and match.conditional
+    for facts in (
+        (PlacementEvidence(planet="Moon", certainty="exact"),),
+        (PlacementEvidence(planet="Moon", house=5, certainty="uncertain"),),
+        (
+            PlacementEvidence(planet="Moon", house=4, certainty="exact"),
+            PlacementEvidence(planet="Venus", house=5, certainty="exact"),
+        ),
+    ):
+        assert retrieve(db_session, query.model_copy(update={"placements": facts})) == ()
+    db_session.rollback()
+    with db_session.begin():
+        db_session.execute(
+            update(KnowledgeSource)
+            .where(
+                KnowledgeSource.source_id == source_id,
+            )
+            .values(enabled=False)
+        )
+    assert retrieve(db_session, query) == ()
+    assert resolve_citation(db_session, match.citation_id) is not None
+    db_session.rollback()
+    with db_session.begin():
+        db_session.execute(
+            update(KnowledgeSource)
+            .where(
+                KnowledgeSource.source_id == source_id,
+            )
+            .values(rights_status="excluded")
+        )
+    assert resolve_citation(db_session, match.citation_id) is None
 
 
 @pytest.mark.parametrize("operation", ["duplicate", "edit", "delete"])

@@ -1,0 +1,397 @@
+{
+  "manifest_schema_version": 1,
+  "source": {
+    "source_id": "brihat-jataka-iyer-1885",
+    "version": 1,
+    "tier": 2,
+    "collection": "production",
+    "title": "The Brihat Jataka of Varaha Mihira",
+    "author": "Varāhamihira",
+    "translator": "N. Chidambaram Iyer",
+    "edition": "Wellcome Collection digitization of the Iyer English edition",
+    "publisher": "Foster Press, Madras",
+    "publication": "1885",
+    "language": "en",
+    "tradition": "Varāhamihira Jyotish",
+    "source_url": "https://wellcomecollection.org/works/afmgm695",
+    "artifact_url": "https://iiif.wellcomecollection.org/presentation/v2/b2488442x",
+    "archive_id": "b2488442x",
+    "retrieved_on": "2026-11-27",
+    "artifact_format": "IIIF Presentation 2 JSON",
+    "artifact_sha256": "cbfbdf9d96e378f8b925ac0b94585dbb62e435bb3c357c9094677df7398b4dbf",
+    "content_sha256": "a6ed86b94240ad7e008fab1a615fc183393edbdadc3804eab3d0f75d2d8ce126",
+    "selection": "Printed pages 10, 12, 14 and 15",
+    "transcription": "Original screened paraphrases manually checked against the Wellcome scan",
+    "rights": {
+      "status": "public_domain_mark",
+      "basis": "Creative Commons Public Domain Mark 1.0 on this Wellcome edition",
+      "holder_or_custodian": "Wellcome Collection",
+      "evidence": [
+        "https://wellcomecollection.org/works/afmgm695",
+        "https://creativecommons.org/publicdomain/mark/1.0/"
+      ],
+      "attribution": "The Brihat Jataka of Varaha Mihira, translated by N. Chidambaram Iyer. Public Domain Mark. Source: Wellcome Collection.",
+      "jurisdictions": [
+        "Institutional public-domain assessment; launch jurisdiction review pending"
+      ],
+      "permitted_uses": [
+        "adapt",
+        "redistribute",
+        "reproduce"
+      ],
+      "reviewed_on": "2026-11-27",
+      "review_reference": "Commit 12.1 edition research; candidate only, no editorial approval"
+    }
+  },
+  "chunks": [
+    {
+      "key": "sun-symbolism",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "II",
+        "page": "14",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0054.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "1bcc70824ef0d837c70245754badb1ce4495429da66f59d2aad81d0dc1e90115"
+      },
+      "applicability": {
+        "topic": "planet_general",
+        "planet": "Sun"
+      },
+      "text": "In the text's Kalapurusha analogy, Sun represents the soul. In its separate court analogy, the same planet takes the role of a king. These are symbolic descriptions.",
+      "content_sha256": "3ded907cec4725e9eaef8068d5a4d16ed410f8972c19e6bdf7882d09855fa471"
+    },
+    {
+      "key": "moon-symbolism",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "II",
+        "page": "14",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0054.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "1bcc70824ef0d837c70245754badb1ce4495429da66f59d2aad81d0dc1e90115"
+      },
+      "applicability": {
+        "topic": "planet_general",
+        "planet": "Moon"
+      },
+      "text": "In the text's Kalapurusha analogy, Moon represents the mind. In its separate court analogy, the same planet takes the role of a king. These are symbolic descriptions.",
+      "content_sha256": "be3aea35d7751c9ec5dafd93d7506637b405bc1f5086b6f926af95b735f352fc"
+    },
+    {
+      "key": "mars-symbolism",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "II",
+        "page": "14",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0054.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "1bcc70824ef0d837c70245754badb1ce4495429da66f59d2aad81d0dc1e90115"
+      },
+      "applicability": {
+        "topic": "planet_general",
+        "planet": "Mars"
+      },
+      "text": "In the text's Kalapurusha analogy, Mars represents strength. In its separate court analogy, the same planet takes the role of the general. These are symbolic descriptions.",
+      "content_sha256": "a6028071587456728376332645721e4f5979718cdec41a1f8fbe8b7132551ca3"
+    },
+    {
+      "key": "mercury-symbolism",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "II",
+        "page": "14",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0054.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "1bcc70824ef0d837c70245754badb1ce4495429da66f59d2aad81d0dc1e90115"
+      },
+      "applicability": {
+        "topic": "planet_general",
+        "planet": "Mercury"
+      },
+      "text": "In the text's Kalapurusha analogy, Mercury represents speech. In its separate court analogy, the same planet takes the role of the first prince. These are symbolic descriptions.",
+      "content_sha256": "3364fe92a67d3026c44934de573f9e6761297465b6414841ea6a3b631de890a2"
+    },
+    {
+      "key": "jupiter-symbolism",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "II",
+        "page": "14",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0054.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "1bcc70824ef0d837c70245754badb1ce4495429da66f59d2aad81d0dc1e90115"
+      },
+      "applicability": {
+        "topic": "planet_general",
+        "planet": "Jupiter"
+      },
+      "text": "In the text's Kalapurusha analogy, Jupiter represents knowledge and health as symbols. In its separate court analogy, the same planet takes the role of a counsellor. These are symbolic descriptions.",
+      "content_sha256": "cb9d47039a1ee15bac7e4fae7a1226da29b2828addc9f7c4798dce8be57b2790"
+    },
+    {
+      "key": "venus-symbolism",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "II",
+        "page": "14",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0054.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "1bcc70824ef0d837c70245754badb1ce4495429da66f59d2aad81d0dc1e90115"
+      },
+      "applicability": {
+        "topic": "planet_general",
+        "planet": "Venus"
+      },
+      "text": "In the text's Kalapurusha analogy, Venus represents desire. In its separate court analogy, the same planet takes the role of a counsellor. These are symbolic descriptions.",
+      "content_sha256": "bbf4934caabe0d14dacc5e12c989a5c544741cf322e7d2034d95c50e55c2cd81"
+    },
+    {
+      "key": "saturn-symbolism",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "II",
+        "page": "14",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0054.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "1bcc70824ef0d837c70245754badb1ce4495429da66f59d2aad81d0dc1e90115"
+      },
+      "applicability": {
+        "topic": "planet_general",
+        "planet": "Saturn"
+      },
+      "text": "In the text's Kalapurusha analogy, Saturn represents sorrow. In its separate court analogy, the same planet takes the role of a servant. These are symbolic descriptions.",
+      "content_sha256": "2e15c4f0141df440bcb298cf3854ea269b239994dcd57bce19219bfdb99bb53a"
+    },
+    {
+      "key": "rahu-node",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "II",
+        "page": "15",
+        "verse": "3",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0055.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "9a5d6858131a4b488882ae464baa1e5840bb812c4d44f2dc442b77638d9cf950"
+      },
+      "applicability": {
+        "topic": "planet_general",
+        "planet": "Rahu"
+      },
+      "text": "Iyer identifies Rahu with the Moon's ascending node and gives Tama, Agu and Asura as traditional terminology in this entry.",
+      "content_sha256": "58f820130e2df36986a85295932fa3554e6776e32c948c7edfa1efe9d8dd7e48"
+    },
+    {
+      "key": "ketu-node",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "II",
+        "page": "15",
+        "verse": "3",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0055.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "9a5d6858131a4b488882ae464baa1e5840bb812c4d44f2dc442b77638d9cf950"
+      },
+      "applicability": {
+        "topic": "planet_general",
+        "planet": "Ketu"
+      },
+      "text": "Iyer identifies Ketu with the Moon's descending node and gives Sikhi as traditional terminology in this entry.",
+      "content_sha256": "6762647dce68d4530e49e4e1e1ef3e3fdbdca1c6d01915a624ab629403e8a115"
+    },
+    {
+      "key": "sun-aries-exaltation",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "10",
+        "verse": "13, Iyer's reference table",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0050.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "54e0fabeb655a9e9c8698ea08dd9049696d3a6d7b8a8b819a93ada00cfdd8296"
+      },
+      "applicability": {
+        "topic": "planet_in_sign",
+        "planet": "Sun",
+        "sign": "Aries"
+      },
+      "text": "Iyer's table names Aries as the exaltation sign of Sun and the 10° point as its principal exaltation degree. A sign placement alone does not identify the degree or determine a personal outcome.",
+      "content_sha256": "004b6e20f8a48440ec75dcbddb4dbb99cbe6a921795a7212819a0b8ca3adf9c8"
+    },
+    {
+      "key": "moon-taurus-exaltation",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "10",
+        "verse": "13, Iyer's reference table",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0050.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "54e0fabeb655a9e9c8698ea08dd9049696d3a6d7b8a8b819a93ada00cfdd8296"
+      },
+      "applicability": {
+        "topic": "planet_in_sign",
+        "planet": "Moon",
+        "sign": "Taurus"
+      },
+      "text": "Iyer's table names Taurus as the exaltation sign of Moon and the 3° point as its principal exaltation degree. A sign placement alone does not identify the degree or determine a personal outcome.",
+      "content_sha256": "a974839f3d7f6ed5319394968e15b103ca4bc0ed9c52aa44d48984f7402b5680"
+    },
+    {
+      "key": "mars-capricorn-exaltation",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "10",
+        "verse": "13, Iyer's reference table",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0050.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "54e0fabeb655a9e9c8698ea08dd9049696d3a6d7b8a8b819a93ada00cfdd8296"
+      },
+      "applicability": {
+        "topic": "planet_in_sign",
+        "planet": "Mars",
+        "sign": "Capricorn"
+      },
+      "text": "Iyer's table names Capricorn as the exaltation sign of Mars and the 28° point as its principal exaltation degree. A sign placement alone does not identify the degree or determine a personal outcome.",
+      "content_sha256": "50f0f40b909103e062bdb1883409b210b2e66aa408e09f10d1c95bd052db0df5"
+    },
+    {
+      "key": "mercury-virgo-exaltation",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "10",
+        "verse": "13, Iyer's reference table",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0050.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "54e0fabeb655a9e9c8698ea08dd9049696d3a6d7b8a8b819a93ada00cfdd8296"
+      },
+      "applicability": {
+        "topic": "planet_in_sign",
+        "planet": "Mercury",
+        "sign": "Virgo"
+      },
+      "text": "Iyer's table names Virgo as the exaltation sign of Mercury and the 15° point as its principal exaltation degree. A sign placement alone does not identify the degree or determine a personal outcome.",
+      "content_sha256": "041d7ca46ff4ea53dc76c728d2e9a344aea5553319e16a8c1633ec2b59d02991"
+    },
+    {
+      "key": "jupiter-cancer-exaltation",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "10",
+        "verse": "13, Iyer's reference table",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0050.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "54e0fabeb655a9e9c8698ea08dd9049696d3a6d7b8a8b819a93ada00cfdd8296"
+      },
+      "applicability": {
+        "topic": "planet_in_sign",
+        "planet": "Jupiter",
+        "sign": "Cancer"
+      },
+      "text": "Iyer's table names Cancer as the exaltation sign of Jupiter and the 5° point as its principal exaltation degree. A sign placement alone does not identify the degree or determine a personal outcome.",
+      "content_sha256": "21323492f9c630fd2eba5b221323d50bb02a4c1606c7dd0bd10fdf526e8e6a1d"
+    },
+    {
+      "key": "venus-pisces-exaltation",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "10",
+        "verse": "13, Iyer's reference table",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0050.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "54e0fabeb655a9e9c8698ea08dd9049696d3a6d7b8a8b819a93ada00cfdd8296"
+      },
+      "applicability": {
+        "topic": "planet_in_sign",
+        "planet": "Venus",
+        "sign": "Pisces"
+      },
+      "text": "Iyer's table names Pisces as the exaltation sign of Venus and the 27° point as its principal exaltation degree. A sign placement alone does not identify the degree or determine a personal outcome.",
+      "content_sha256": "58448e1683bbbfee34513f1ef7048577019525e896e4bb94cbf1d4ebd49df845"
+    },
+    {
+      "key": "saturn-libra-exaltation",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "10",
+        "verse": "13, Iyer's reference table",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0050.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "54e0fabeb655a9e9c8698ea08dd9049696d3a6d7b8a8b819a93ada00cfdd8296"
+      },
+      "applicability": {
+        "topic": "planet_in_sign",
+        "planet": "Saturn",
+        "sign": "Libra"
+      },
+      "text": "Iyer's table names Libra as the exaltation sign of Saturn and the 20° point as its principal exaltation degree. A sign placement alone does not identify the degree or determine a personal outcome.",
+      "content_sha256": "c400790fe066316073ac5f4c9c28d76fbd114e7b3dc80a8f4d1c6a6979d33350"
+    },
+    {
+      "key": "fourth-house",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "12",
+        "verse": "15, note (a)",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0052.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "884c567cd3d5f88bcab08ccfd67711894f352285186e25e7e4421e5c774b3b71"
+      },
+      "applicability": {
+        "topic": "house_general",
+        "house": 4
+      },
+      "text": "Iyer's fourth-house entry associates this house, counted from the ascendant, with home, relatives, education and comfort. These are topics for the house itself.",
+      "content_sha256": "2fd1b0bed47816b32bcc517c531695dc67968cdb4c28c8f6365d6d727d2d72d8"
+    },
+    {
+      "key": "fifth-house",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "12",
+        "verse": "16",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0052.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "884c567cd3d5f88bcab08ccfd67711894f352285186e25e7e4421e5c774b3b71"
+      },
+      "applicability": {
+        "topic": "house_general",
+        "house": 5
+      },
+      "text": "Iyer uses Pratibha, glossed as intelligence, for the fifth house counted from the ascendant. This is house terminology.",
+      "content_sha256": "a9e14f2154073b78d0d5c0f810aec23d0eb381a0bfe830ce8f940390c453e73e"
+    },
+    {
+      "key": "tenth-house",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "I",
+        "page": "12",
+        "verse": "15, note (a)",
+        "canvas": "https://iiif.wellcomecollection.org/image/b2488442x_0052.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "884c567cd3d5f88bcab08ccfd67711894f352285186e25e7e4421e5c774b3b71"
+      },
+      "applicability": {
+        "topic": "house_general",
+        "house": 10
+      },
+      "text": "Among the traditional topics of the tenth house counted from the ascendant, Iyer includes occupation and knowledge. These associations describe a house rather than a vocational outcome.",
+      "content_sha256": "53c226bb33b20b1f9b55d290fd006340d549f04a40de53230d684bf0ac14c274"
+    }
+  ]
+}

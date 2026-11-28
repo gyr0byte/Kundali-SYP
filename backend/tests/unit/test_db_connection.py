@@ -100,6 +100,36 @@ def test_checker_reports_known_statuses(checker: ModuleType) -> None:
     assert str(connection.execute.call_args_list[0].args[0]) == "SET TRANSACTION READ ONLY"
 
 
+@pytest.mark.parametrize(
+    ("revision", "reported", "exit_code"),
+    [
+        ("0006_knowledge_corpus", "0006_knowledge_corpus", 0),
+        ("0005_resolved_bs_profiles", "0005_resolved_bs_profiles", 1),
+        ("unrecognized_revision", "unknown", 1),
+    ],
+)
+def test_checker_readiness_by_revision(
+    checker: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    revision: str,
+    reported: str,
+    exit_code: int,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", FIXTURE)
+    monkeypatch.setenv("KUNDALI_DB_CA_FILE", __file__)
+    engine = MagicMock()
+    connection = engine.connect.return_value.__enter__.return_value
+    connection.connection.driver_connection.pgconn.ssl_in_use = True
+    connection.scalar.side_effect = [1, True, True, True]
+    connection.scalars.return_value.all.return_value = [revision]
+    monkeypatch.setattr(checker, "postgres_engine", lambda _: engine)
+
+    assert checker.main() == exit_code
+    assert f"Alembic revision: {reported}\n" in capsys.readouterr().out
+    engine.dispose.assert_called_once()
+
+
 def test_checker_sanitizes_failure(
     checker: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

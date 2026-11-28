@@ -1,0 +1,340 @@
+{
+  "manifest_schema_version": 1,
+  "source": {
+    "source_id": "brihat-samhita-iyer-1884-1885",
+    "version": 1,
+    "tier": 2,
+    "collection": "production",
+    "title": "The Brihat Samhita of Varaha Mihira",
+    "author": "Varāhamihira",
+    "translator": "N. Chidambaram Iyer",
+    "edition": "Wellcome Collection digitization of the Iyer English edition",
+    "publisher": "South Indian Press, Madura (part I); Foster Press, Madras (part II)",
+    "publication": "1884–1885",
+    "language": "en",
+    "tradition": "Varāhamihira Jyotish",
+    "source_url": "https://wellcomecollection.org/works/hzaaf9ak",
+    "artifact_url": "https://iiif.wellcomecollection.org/presentation/v2/b29353130",
+    "archive_id": "b29353130",
+    "retrieved_on": "2026-11-27",
+    "artifact_format": "IIIF Presentation 2 JSON",
+    "artifact_sha256": "0b57b7bc033e567cee0029b9f8abbdbbaad44d06503bf3c5e87be51c1a3a9b3d",
+    "content_sha256": "e066b43fc1fcdc1936f26b5e6163f42141574094406cd7fa5aabe1cdbd61c3ce",
+    "selection": "Part II printed pages 235–239; 238 also contains the chapter-end qualification",
+    "transcription": "Original screened paraphrases manually checked against the Wellcome scan",
+    "rights": {
+      "status": "public_domain_mark",
+      "basis": "Creative Commons Public Domain Mark 1.0 on this Wellcome edition",
+      "holder_or_custodian": "Wellcome Collection",
+      "evidence": [
+        "https://wellcomecollection.org/works/hzaaf9ak",
+        "https://creativecommons.org/publicdomain/mark/1.0/"
+      ],
+      "attribution": "The Brihat Samhita of Varaha Mihira, translated by N. Chidambaram Iyer. Public Domain Mark. Source: Wellcome Collection.",
+      "jurisdictions": [
+        "Institutional public-domain assessment; launch jurisdiction review pending"
+      ],
+      "permitted_uses": [
+        "adapt",
+        "redistribute",
+        "reproduce"
+      ],
+      "reviewed_on": "2026-11-27",
+      "review_reference": "Commit 12.1 edition research; candidate only, no editorial approval"
+    }
+  },
+  "chunks": [
+    {
+      "key": "aries-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "238",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0472.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "cc2add7e45f3f0fc13dbb534324fa2c436b11dbd0debfe1a04b9b14f87b179c8"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Aries"
+      },
+      "text": "The chapter on zodiac division describes Aries by the following lunar-mansion sequence: all of Ashwini and Bharani, then Krittika quarter 1. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "eedd245a6f8bdc05bfb4b6ee75573db5b166b12bccb21bde8f4ef9ed8e085082"
+    },
+    {
+      "key": "taurus-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "238",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0472.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "cc2add7e45f3f0fc13dbb534324fa2c436b11dbd0debfe1a04b9b14f87b179c8"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Taurus"
+      },
+      "text": "The chapter on zodiac division describes Taurus by the following lunar-mansion sequence: Krittika quarters 2–4, all of Rohini, then Mrigashirsha quarters 1–2. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "a995ba0a295338181a151cbf471e5c7aa954d31da88d3eb76208467aa7bc3cbf"
+    },
+    {
+      "key": "gemini-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "238",
+        "verse": "2",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0472.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "cc2add7e45f3f0fc13dbb534324fa2c436b11dbd0debfe1a04b9b14f87b179c8"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Gemini"
+      },
+      "text": "The chapter on zodiac division describes Gemini by the following lunar-mansion sequence: Mrigashirsha quarters 3–4, all of Ardra, then Punarvasu quarters 1–3. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "aaa2f6dadcbe7e88c0e64c43aca490f7909a4e693880271c3de48ff80783cc15"
+    },
+    {
+      "key": "cancer-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "238",
+        "verse": "2",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0472.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "cc2add7e45f3f0fc13dbb534324fa2c436b11dbd0debfe1a04b9b14f87b179c8"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Cancer"
+      },
+      "text": "The chapter on zodiac division describes Cancer by the following lunar-mansion sequence: Punarvasu quarter 4 followed by all of Pushya and Ashlesha. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "ceeffbdc17b30ab29f81861ece33d88f02b6a96a3f7172af6ab7da667231ed90"
+    },
+    {
+      "key": "leo-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "238",
+        "verse": "3",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0472.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "cc2add7e45f3f0fc13dbb534324fa2c436b11dbd0debfe1a04b9b14f87b179c8"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Leo"
+      },
+      "text": "The chapter on zodiac division describes Leo by the following lunar-mansion sequence: all of Magha and Purva Phalguni, then Uttara Phalguni quarter 1. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "2b105c51952288c9c2b8724ea4239ce66a101d0b428f7d2738ec337ebd5ba347"
+    },
+    {
+      "key": "virgo-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "238",
+        "verse": "3",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0472.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "cc2add7e45f3f0fc13dbb534324fa2c436b11dbd0debfe1a04b9b14f87b179c8"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Virgo"
+      },
+      "text": "The chapter on zodiac division describes Virgo by the following lunar-mansion sequence: Uttara Phalguni quarters 2–4, all of Hasta, then Chitra quarters 1–2. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "7cf488b1f43f7e859e144ea30ee898e288e9b1c3cbe91607ceda388c90b653be"
+    },
+    {
+      "key": "libra-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "239",
+        "verse": "4",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0473.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "40c500ea1026709287c2fb1b92da3b32422a6b8472aa8e8bca0d8410475da607"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Libra"
+      },
+      "text": "The chapter on zodiac division describes Libra by the following lunar-mansion sequence: Chitra quarters 3–4, all of Swati, then Vishakha quarters 1–3. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "4095029094069d93e096a60d80e6754f1e9454fe1405b97dd3968b0acd2b705f"
+    },
+    {
+      "key": "scorpio-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "239",
+        "verse": "4",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0473.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "40c500ea1026709287c2fb1b92da3b32422a6b8472aa8e8bca0d8410475da607"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Scorpio"
+      },
+      "text": "The chapter on zodiac division describes Scorpio by the following lunar-mansion sequence: Vishakha quarter 4 followed by all of Anuradha and Jyeshtha. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "19343b61d84ff79ec21032cebe790454b6e8e1fc528eeb01167d9189f6cc8684"
+    },
+    {
+      "key": "sagittarius-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "239",
+        "verse": "5",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0473.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "40c500ea1026709287c2fb1b92da3b32422a6b8472aa8e8bca0d8410475da607"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Sagittarius"
+      },
+      "text": "The chapter on zodiac division describes Sagittarius by the following lunar-mansion sequence: all of Mula and Purva Ashadha, then Uttara Ashadha quarter 1. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "5ff7ff6cff676c592c25ca2878a01bda0d0a0e59c68999a3c4feacb09e2d2b9b"
+    },
+    {
+      "key": "capricorn-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "239",
+        "verse": "5",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0473.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "40c500ea1026709287c2fb1b92da3b32422a6b8472aa8e8bca0d8410475da607"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Capricorn"
+      },
+      "text": "The chapter on zodiac division describes Capricorn by the following lunar-mansion sequence: Uttara Ashadha quarters 2–4, all of Shravana, then quarters 1–2 of Sravishta (Dhanishta). This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "f0b91df4a837fc53072f86d9b0044f40e5a73a0161db640b9683d499b6ead024"
+    },
+    {
+      "key": "aquarius-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "239",
+        "verse": "6",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0473.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "40c500ea1026709287c2fb1b92da3b32422a6b8472aa8e8bca0d8410475da607"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Aquarius"
+      },
+      "text": "The chapter on zodiac division describes Aquarius by the following lunar-mansion sequence: quarters 3–4 of Sravishta (Dhanishta), all of Shatabhisha, then Purva Bhadrapada quarters 1–3. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "40409793d58c2a451d55b818a6e0bf7d907b6dee47d5697d26dfe0c06086ab5c"
+    },
+    {
+      "key": "pisces-division",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LV (102)",
+        "page": "239",
+        "verse": "6",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0473.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "40c500ea1026709287c2fb1b92da3b32422a6b8472aa8e8bca0d8410475da607"
+      },
+      "applicability": {
+        "topic": "sign_general",
+        "sign": "Pisces"
+      },
+      "text": "The chapter on zodiac division describes Pisces by the following lunar-mansion sequence: Purva Bhadrapada quarter 4 followed by all of Uttara Bhadrapada and Revati. This maps sign subdivisions and assigns no meanings to individual Padas.",
+      "content_sha256": "ec8fb5e1560fd119164f11d27cb7a1a67219c68f4599d3c52fda930cbc49c30d"
+    },
+    {
+      "key": "ashwini-natal-motifs",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LIV (101)",
+        "page": "235",
+        "verse": "1",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0469.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "c817a79650b54e217333053a6a1332efdee3721d9b92a1774821c0790f11c224"
+      },
+      "applicability": {
+        "topic": "nakshatra",
+        "body": "Moon",
+        "nakshatra": "Ashwini"
+      },
+      "text": "For the Moon at birth in Ashwini, the text's traditional portrait includes adornment, agreeable manners and skill. The chapter-end note qualifies the portrait by the Moon's strength. This selected motif does not establish strength or personal traits.",
+      "content_sha256": "76bb9a2bdd4550836a64d459d60595ffe06a4342a7dae30f30784c9a17647087"
+    },
+    {
+      "key": "rohini-natal-motifs",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LIV (101)",
+        "page": "235",
+        "verse": "2",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0469.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "c817a79650b54e217333053a6a1332efdee3721d9b92a1774821c0790f11c224"
+      },
+      "applicability": {
+        "topic": "nakshatra",
+        "body": "Moon",
+        "nakshatra": "Rohini"
+      },
+      "text": "For the Moon at birth in Rohini, the text's traditional portrait includes truthfulness, pleasant speech and firmness of views. The chapter-end note qualifies the portrait by the Moon's strength. This selected motif does not establish strength or personal traits.",
+      "content_sha256": "84b952561d60df93e166359426f641c91c647b2c10f1a3794f9aeccefc608428"
+    },
+    {
+      "key": "chitra-natal-motifs",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LIV (101)",
+        "page": "236",
+        "verse": "8",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0470.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "03bc6dbcf889d05601ca24ef55388601225a417ab61ab5636fd80048f5b2f9d1"
+      },
+      "applicability": {
+        "topic": "nakshatra",
+        "body": "Moon",
+        "nakshatra": "Chitra"
+      },
+      "text": "For the Moon at birth in Chitra, the text's traditional portrait includes brightly varied clothing and flowers. The chapter-end note qualifies the portrait by the Moon's strength. This selected motif does not establish strength or personal traits.",
+      "content_sha256": "20f1eb269b47b7271004253dab3792c0134489f717b95eb186e296eb936883ef"
+    },
+    {
+      "key": "swati-natal-motifs",
+      "revision": 1,
+      "language": "en",
+      "locator": {
+        "chapter": "Part II, LIV (101)",
+        "page": "236",
+        "verse": "8",
+        "canvas": "https://iiif.wellcomecollection.org/image/b29353130_0470.jp2/full/1050,/0/default.jpg",
+        "image_sha256": "03bc6dbcf889d05601ca24ef55388601225a417ab61ab5636fd80048f5b2f9d1"
+      },
+      "applicability": {
+        "topic": "nakshatra",
+        "body": "Moon",
+        "nakshatra": "Swati"
+      },
+      "text": "For the Moon at birth in Swati, the text's traditional portrait includes gentleness, self-restraint and generosity. The chapter-end note qualifies the portrait by the Moon's strength. This selected motif does not establish strength or personal traits.",
+      "content_sha256": "86e98ae0e62e4ab5bc5575ed5e748de5426ddeada068e49aebd99020ac3c26e1"
+    }
+  ]
+}

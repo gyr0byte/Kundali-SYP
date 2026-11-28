@@ -1,0 +1,8 @@
+[
+  {"query":"Moon attention","topics":["planet_general"],"placements":[],"keys":["moon-general"]},
+  {"query":"Moon fifth attention","topics":["planet_in_house"],"placements":[{"planet":"Moon","house":5,"certainty":"exact"}],"keys":["moon-fifth"]},
+  {"query":"Moon fifth attention","topics":["planet_in_house"],"placements":[{"planet":"Moon","house":4,"certainty":"exact"},{"planet":"Venus","house":5,"certainty":"exact"}],"keys":[]},
+  {"query":"Moon fifth attention","topics":["planet_in_house"],"placements":[{"planet":"Moon","house":5,"certainty":"uncertain"}],"keys":[]},
+  {"query":"Moon fifth attention","topics":["planet_in_house"],"placements":[{"planet":"Moon","certainty":"exact"}],"keys":[]},
+  {"query":"Vimshottari","topics":["dasha"],"placements":[],"keys":[]}
+]

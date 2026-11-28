@@ -66,6 +66,10 @@ Only run live commands when explicitly authorized. Verify branch and database in
 
 Exit codes are `0` for ready, `1` for reachable with incomplete schema or extension, `2` for invalid configuration, and `3` for connectivity or inspection failure. The checker needs no JWT or Fernet key.
 
+Readiness requires revision `0006_knowledge_corpus` and installed pgvector.
+The checker reports recognized earlier revisions by name. For example,
+`0005_resolved_bs_profiles` is recognized and returns exit code `1`.
+
 To apply migrations, run the Alembic command above from `backend` without `--sql`, then rerun the checker. Revision `0003_enable_pgvector` creates the PostgreSQL extension `vector` if absent. Availability and permission to install are separate. Downgrade retains the extension because it may predate the migration or be shared.
 
 The migrator needs `USAGE` and `CREATE` on the target schema and ownership, directly or through an approved owner role, of objects that it alters or drops. Database-wide CREATE and broader role memberships are unnecessary for ordinary table migrations. Check extension-specific grants separately when a future migration installs or updates an extension. Explicitly grant the runtime role the intended access to newly created objects from the owning role and verify the effective grants. Keep DDL with the migrator and preserve audit append-only and migration-history read-only access. Alembic currently emits a generic sanitized error on live failure. A future improvement is to report the operation stage and allowlisted SQLSTATE without exception text, query parameters, or connection details.
