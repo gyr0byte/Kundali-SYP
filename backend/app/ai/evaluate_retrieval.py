@@ -1,4 +1,4 @@
-"""Offline retrieval evaluation and explicitly gated Vertex pilot entry point."""
+"""Offline retrieval evaluation and explicitly gated Gemini hosted pilots."""
 
 import argparse
 import json
@@ -7,12 +7,14 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from time import perf_counter_ns
+from typing import Literal
 
 import httpx
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.ai.embeddings import EmbeddingError, EmbeddingQuery, Vector
+from app.ai.embeddings import EmbeddingError, EmbeddingProvider, EmbeddingQuery, Vector
+from app.ai.gemini_developer_embeddings import GeminiDeveloperEmbeddings
 from app.ai.gemini_embeddings import MAX_ATTEMPTS, AttemptOutcome, VertexGeminiEmbeddings
 from app.ai.retrieval import TIER2_BONUS
 from app.ai.retrieval_evaluation import (
@@ -26,6 +28,9 @@ from app.ai.retrieval_evaluation import (
 )
 from app.knowledge.provenance import sha256
 from app.knowledge.retrieval import Match, Search
+
+_FREE_FIXTURE_SHA256 = "7f35fe79f71e8f9c07f757a5f3523f7cfd8632e688405df3724c9e2303d10b66"
+_FREE_MAX_ATTEMPTS = 44
 
 
 class PilotRejected(ValueError):
@@ -41,6 +46,8 @@ class PilotSettings:
     max_attempts: int
     max_spend_microusd: int
     price_per_1000_microusd: int
+    provider: Literal["vertex", "developer"] = "vertex"
+    confirm_free_tier: bool = False
 
 
 @dataclass(frozen=True)
@@ -118,7 +125,23 @@ def hosted_report(
     dataset, digest = load_dataset()
     if digest != settings.approved_digest:
         raise PilotRejected("Approved evaluation dataset checksum does not match")
-    if (
+    developer = settings.provider == "developer"
+    if developer:
+        if not settings.confirm_free_tier:
+            raise PilotRejected("Developer execution requires explicit free-tier confirmation")
+        if digest != _FREE_FIXTURE_SHA256:
+            raise PilotRejected("Developer execution requires the pinned synthetic fixture")
+        if (
+            settings.project
+            or settings.location
+            or settings.max_spend_microusd != 0
+            or settings.price_per_1000_microusd != 0
+            or not 1 <= settings.max_attempts <= _FREE_MAX_ATTEMPTS
+        ):
+            raise PilotRejected(
+                "Developer execution requires a zero-cost plan and at most 44 attempts"
+            )
+    elif settings.confirm_free_tier or (
         min(settings.max_attempts, settings.max_spend_microusd, settings.price_per_1000_microusd)
         < 1
     ):
@@ -126,6 +149,10 @@ def hosted_report(
     cases = prepare(dataset)
     work = _work(dataset, cases)
     plan = _plan(work)
+    if developer and (plan["documents"], plan["unique_canonical_queries"]) != (13, 9):
+        raise PilotRejected(
+            "Developer execution requires the reviewed 13 documents and nine queries"
+        )
     if (
         plan["maximum_attempts"] > settings.max_attempts
         or plan["maximum_charge_units"] * settings.price_per_1000_microusd
@@ -139,15 +166,27 @@ def hosted_report(
     def record_attempt(outcome: AttemptOutcome, elapsed_ms: float) -> None:
         attempts_log.append({"outcome": outcome, "latency_ms": round(elapsed_ms, 4)})
 
-    provider = VertexGeminiEmbeddings(
-        settings.project,
-        settings.location,
-        access_token,
-        transport=transport,
-        on_attempt=usage.attempt,
-        on_attempt_result=record_attempt,
-        on_usage=usage.report,
-    )
+    provider: EmbeddingProvider
+    if developer:
+        provider = GeminiDeveloperEmbeddings(
+            access_token,
+            approved_documents=frozenset(item.content for item in work if item.query is None),
+            approved_queries=frozenset(item.content for item in work if item.query is not None),
+            transport=transport,
+            on_attempt=usage.attempt,
+            on_attempt_result=record_attempt,
+            on_usage=usage.report,
+        )
+    else:
+        provider = VertexGeminiEmbeddings(
+            settings.project,
+            settings.location,
+            access_token,
+            transport=transport,
+            on_attempt=usage.attempt,
+            on_attempt_result=record_attempt,
+            on_usage=usage.report,
+        )
     requests: list[dict[str, object]] = []
     queries: dict[str, Vector] = {}
     documents: dict[str, Vector] = {}
@@ -201,12 +240,13 @@ def hosted_report(
         "dataset_version": dataset.version,
         "dataset_sha256": digest,
         "provider": provider.config.model_dump(mode="json"),
-        "vertex_project_sha256": sha256(settings.project.encode("utf-8")),
+        "vertex_project_sha256": None if developer else sha256(settings.project.encode("utf-8")),
         "status": "complete" if complete else "incomplete",
         "budget": {
             "max_attempts": settings.max_attempts,
             "max_spend_microusd": settings.max_spend_microusd,
             "price_per_1000_microusd": settings.price_per_1000_microusd,
+            "free_tier_confirmed_by_operator": developer,
             "plan": plan,
         },
         "usage": {
@@ -225,6 +265,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--authorize-hosted", action="store_true")
+    parser.add_argument("--provider", choices=("vertex", "developer"), default="vertex")
+    parser.add_argument("--confirm-free-tier", action="store_true")
     parser.add_argument("--approved-dataset-sha256", default="")
     parser.add_argument("--project", default="")
     parser.add_argument("--location", default="")
@@ -243,6 +285,11 @@ def main() -> int:
                 )
         complete = True
         if args.authorize_hosted:
+            credential_env = (
+                "KUNDALI_GEMINI_API_KEY"
+                if args.provider == "developer"
+                else "KUNDALI_VERTEX_ACCESS_TOKEN"
+            )
             report, complete = hosted_report(
                 PilotSettings(
                     args.authorize_hosted,
@@ -252,10 +299,14 @@ def main() -> int:
                     args.max_attempts,
                     args.max_spend_microusd,
                     args.price_per_1000_microusd,
+                    args.provider,
+                    args.confirm_free_tier,
                 ),
-                lambda: os.environ.get("KUNDALI_VERTEX_ACCESS_TOKEN", ""),
+                lambda: os.environ.get(credential_env, ""),
             )
         else:
+            if args.provider == "developer" or args.confirm_free_tier:
+                raise PilotRejected("Hosted execution requires explicit authorization")
             dataset, digest = load_dataset()
             cases = prepare(dataset)
             report = {

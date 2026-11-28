@@ -22,7 +22,13 @@ _TRANSIENT_STATUS = {429, 500, 502, 503, 504}
 _MAX_RESPONSE = 65536
 MAX_ATTEMPTS = 2
 AttemptOutcome = Literal[
-    "ok", "transient_http", "rejected_http", "invalid_response", "transport_failure", "deadline"
+    "ok",
+    "transient_http",
+    "rejected_http",
+    "invalid_response",
+    "transport_failure",
+    "deadline",
+    "quota_exhausted",
 ]
 
 

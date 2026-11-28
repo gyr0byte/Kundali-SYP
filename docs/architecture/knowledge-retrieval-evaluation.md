@@ -90,7 +90,7 @@ uses the same distance, tier and citation tie-break order as pgvector. The
 pilot uses in-memory scores and does not benchmark PostgreSQL execution or
 pgvector float32 effects. Controlled vectors and mock HTTP tests verify
 pipeline behavior. No model-quality result is available yet.
-Vertex authentication, hosted latency and actual cost remain unverified.
+Vertex authentication, latency and actual cost remain unverified.
 
 ## Future Vertex pilot
 
@@ -161,3 +161,83 @@ pool. The run holds vectors in memory and creates no database build or corpus
 release. The model revision remains unset because the provider has not exposed
 one through this adapter. Future reruns can detect differences in results
 with the same inputs but cannot pin changes behind the hosted model identifier.
+
+## Free Gemini Developer API pilot
+
+Use an AI Studio key from a project that remains on the Gemini API free tier
+with billing disabled. Confirm the project's tier and available quota before
+authorizing a run. The runner sets the cost budget and unit price to zero,
+caps attempts at 44, and stops on HTTP 429 without trying another provider or
+tier. The API response does not attest to the project's billing tier, so the
+operator must verify it in AI Studio.
+[Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-embedding) ·
+[Rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)
+
+Google can use unpaid submissions to improve its products, and human
+reviewers may process them. The Developer pilot accepts only the pinned
+fixture's 13 project-owned passages and nine canonical queries. Raw prompts,
+personal chart data and the 35 unpublished candidates are outside that
+allowlist. Vectors stay in memory, and the Developer provider identity is
+distinct from Vertex in build compatibility checks.
+[Gemini API unpaid-service terms](https://ai.google.dev/gemini-api/terms#unpaid-services)
+
+The adapter calls the text `embedContent` method for `gemini-embedding-001`
+using the `x-goog-api-key` header, requests 384 dimensions and normalizes
+the result. It uses separate retrieval task types for queries and documents.
+The report records each attempt's outcome and latency, plus prompt token counts
+when Google returns usage metadata.
+[Gemini embeddings guide](https://ai.google.dev/gemini-api/docs/embeddings) ·
+[REST reference](https://ai.google.dev/api/embeddings)
+
+Once the run is authorized, use the Windows account that stored the
+DPAPI-encrypted key at `D:\DevSecrets\Kundali\gemini-api-key.dpapi`.
+Run from the repository root in Windows PowerShell and choose a fresh JSON
+output path in an existing D: directory. The script gives the key only to
+the evaluation child process and clears its own launch copy after startup.
+
+```powershell
+& .\scripts\run-gemini-free-evaluation.ps1 -AuthorizeHosted -ConfirmFreeTier `
+  -ApprovedDatasetSha256 '7f35fe79f71e8f9c07f757a5f3523f7cfd8632e688405df3724c9e2303d10b66' `
+  -Output 'D:\DevCache\tmp\kundali-gemini-free-eval-v1.json'
+```
+
+### Completed pilot and serving decision
+
+The authorized Developer API pilot used `gemini-embedding-001` at 384
+dimensions with the fixture SHA-256
+`7f35fe79f71e8f9c07f757a5f3523f7cfd8632e688405df3724c9e2303d10b66`.
+All 22 requests (13 documents and nine canonical queries) succeeded on the
+first attempt. Estimated API cost was $0 under the confirmed free-tier
+configuration. The export contained no provider usage reports and the estimate
+does not verify an invoice.
+
+| Metric | Canonical keyword | Gemini semantic |
+| --- | ---: | ---: |
+| Recall@1 | 0.95 | 0.90 |
+| Recall@5 | 1.00 | 1.00 |
+| nDCG@5 | 0.991972 | 0.969343 |
+| MRR@5 | 1.00 | 0.95 |
+| Applicability violations / publication leaks | 0 / 0 | 0 / 0 |
+| Local ranking p50 / p95 | 0.80 / 1.07 ms | 0.87 / 1.16 ms |
+
+Median hosted request duration was 893.33 ms across all requests and
+1,136.55 ms for query encoding. The local rankings used precomputed vectors
+and exclude hosted encoding time. The sequential run does not establish
+production or concurrent latency.
+
+The 0.01 Tier 2 bonus changed no rankings. Gemini ranked the irrelevant
+`moon-index` passage first for all four Moon-general language variants.
+Those four cases share one canonical intent. The 60 cases span only 15
+question families, with 40 cases contributing ranking judgments and a search
+pool of 13 eligible passages. The high canonical baseline leaves no headroom
+at Recall@5. Labels and Nepali phrasing lack independent review, so this
+pilot cannot establish real-world multilingual retrieval quality.
+
+Use canonical keyword retrieval as the initial serving strategy. It led on
+early ranking metrics in this pilot and keeps retrieval local. Retain Gemini
+Developer API, Vertex AI, pgvector storage and semantic retrieval as optional
+capabilities. Keep the free-tier adapter restricted to the synthetic evaluation
+fixture. Production user data remains outside its scope.
+
+Offline verification passed 56 focused implementation tests and 21 focused
+credential-format tests. The two runs overlap.
