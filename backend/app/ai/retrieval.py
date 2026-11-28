@@ -22,6 +22,7 @@ from app.knowledge.provenance import sha256
 from app.knowledge.retrieval import Match, Search, match_candidate, retrieve, search_statement
 
 FallbackReason = Literal["build_unavailable", "provider_unavailable", "vectors_unavailable"]
+TIER2_BONUS = 0.01
 
 
 @dataclass(frozen=True)
@@ -48,10 +49,12 @@ def vector_candidates(
 def order_by_cosine(
     statement: Select[KnowledgeChunk, KnowledgeSource],
     vector: Vector,
+    *,
+    tier2_bonus: float = TIER2_BONUS,
 ) -> Select[KnowledgeChunk, KnowledgeSource]:
     """Order already-filtered rows with the native exact pgvector distance."""
     distance = KnowledgeChunkVector.embedding.cosine_distance(list(vector))
-    tier_bonus = case((KnowledgeSource.tier == 2, 0.01), else_=0.0)
+    tier_bonus = case((KnowledgeSource.tier == 2, tier2_bonus), else_=0.0)
     return statement.where(distance.between(0.0, 2.0)).order_by(
         distance - tier_bonus,
         KnowledgeSource.tier,
@@ -59,7 +62,7 @@ def order_by_cosine(
     )
 
 
-def _semantic_match(chunk: KnowledgeChunk, source: KnowledgeSource, search: Search) -> Match | None:
+def semantic_match(chunk: KnowledgeChunk, source: KnowledgeSource, search: Search) -> Match | None:
     match = match_candidate(chunk, source, search)
     if (
         match is None
@@ -77,10 +80,13 @@ def retrieve_semantic(
     *,
     build_id: str,
     provider: EmbeddingProvider | None,
+    tier2_bonus: float = TIER2_BONUS,
 ) -> RetrievalResult:
     """Serve only production rows from one requested build and provider configuration."""
     if {target.topic for target in intent.targets} != set(search.topics):
         raise ValueError("Semantic intent must match the requested topics")
+    if search.targets and EmbeddingQuery(targets=search.targets).encode() != intent.encode():
+        raise ValueError("Semantic intent must match the requested targets")
 
     def fallback(reason: FallbackReason) -> RetrievalResult:
         return RetrievalResult(retrieve(session, search), "keyword", reason)
@@ -94,7 +100,7 @@ def retrieve_semantic(
     eligible = search_statement(search)
     candidate_ids = []
     for chunk, source in session.execute(eligible.execution_options(populate_existing=True)):
-        if _semantic_match(chunk, source, search) is not None:
+        if semantic_match(chunk, source, search) is not None:
             candidate_ids.append(chunk.citation_id)
     if not candidate_ids:
         return RetrievalResult((), "semantic")
@@ -112,9 +118,11 @@ def retrieve_semantic(
 
     matches = []
     # Reapply SQL eligibility to ranking and refresh ORM state for the final typed-fact check.
-    ranked = order_by_cosine(candidates, query_vector).execution_options(populate_existing=True)
+    ranked = order_by_cosine(candidates, query_vector, tier2_bonus=tier2_bonus).execution_options(
+        populate_existing=True
+    )
     for chunk, source in session.execute(ranked):
-        if (match := _semantic_match(chunk, source, search)) is not None:
+        if (match := semantic_match(chunk, source, search)) is not None:
             matches.append(match)
             if len(matches) == search.limit:
                 break

@@ -57,6 +57,7 @@ class Search(Record):
     topics: tuple[Topic, ...] = Field(min_length=1, max_length=8)
     languages: tuple[Language, ...] = Field(min_length=1, max_length=8)
     limit: Annotated[int, Field(strict=True, ge=1, le=20)] = 8
+    targets: tuple[Applicability, ...] = Field(default=(), max_length=8)
     placements: tuple[PlacementEvidence, ...] = Field(default=(), max_length=16)
     dashas: tuple[DashaEvidence, ...] = Field(default=(), max_length=3)
     evaluation: Evaluation | None = None
@@ -203,6 +204,17 @@ def match_candidate(chunk: KnowledgeChunk, source: KnowledgeSource, search: Sear
     try:
         rule = _RULE.validate_python(chunk.applicability)
     except ValidationError:
+        return None
+    if search.targets and not any(
+        rule == target
+        or (
+            isinstance(rule, DashaRule)
+            and isinstance(target, DashaRule)
+            and rule.parent_lord is None
+            and rule == target.model_copy(update={"parent_lord": None})
+        )
+        for target in search.targets
+    ):
         return None
     conditional = _applicable(rule, search)
     if conditional is None:
